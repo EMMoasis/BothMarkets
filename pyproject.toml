@@ -1,0 +1,23 @@
+[project]
+name = "bothmarkets-arb-scanner"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx",
+    "python-dotenv",
+    "py-clob-client",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-mock",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends.legacy:build"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scanner*"]
