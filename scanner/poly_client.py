@@ -284,7 +284,12 @@ def _normalize_gamma_market(gm: dict[str, Any]) -> list[NormalizedMarket]:
     condition_id = (gm.get("conditionId") or "").strip()
     question = (gm.get("question") or "").strip()
     end_date_str = (gm.get("endDate") or gm.get("endDateIso") or "").strip()
-    slug = (gm.get("slug") or "").strip()
+
+    # Prefer the parent EVENT slug (e.g. "lol-t1-dk-2026-02-22") over the market slug
+    # (e.g. "lol-t1-dk-2026-02-22-game1") — the event slug is the working Polymarket URL.
+    events = gm.get("events") or []
+    event_slug = (events[0].get("slug") or "") if events else ""
+    slug = event_slug or (gm.get("slug") or "").strip()
 
     if not condition_id or not question or not end_date_str:
         return []
