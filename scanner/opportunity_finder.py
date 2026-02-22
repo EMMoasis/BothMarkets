@@ -77,16 +77,21 @@ class OpportunityFinder:
 
     def log_pair_prices(self, pair: MatchedPair) -> None:
         """
-        Log a matched pair with current prices and strategy evaluation.
+        Log a matched pair with current prices, depth, and strategy evaluation.
         Called every price poll cycle for all matched pairs (even without arb).
         """
         km = pair.kalshi
         pm = pair.poly
 
-        k_yes = f"{km.yes_ask_cents:.1f}c" if km.yes_ask_cents is not None else "N/A"
-        k_no  = f"{km.no_ask_cents:.1f}c"  if km.no_ask_cents  is not None else "N/A"
-        p_yes = f"{pm.yes_ask_cents:.1f}c" if pm.yes_ask_cents is not None else "N/A"
-        p_no  = f"{pm.no_ask_cents:.1f}c"  if pm.no_ask_cents  is not None else "N/A"
+        def _fmt(cents, depth) -> str:
+            price = f"{cents:.1f}c" if cents is not None else "N/A"
+            dep   = f"/{depth:.0f}sh" if depth is not None else ""
+            return price + dep
+
+        k_yes = _fmt(km.yes_ask_cents, km.yes_ask_depth)
+        k_no  = _fmt(km.no_ask_cents,  km.no_ask_depth)
+        p_yes = _fmt(pm.yes_ask_cents, pm.yes_ask_depth)
+        p_no  = _fmt(pm.no_ask_cents,  pm.no_ask_depth)
 
         strat_a = _combined_str(km.yes_ask_cents, pm.no_ask_cents, "K-YES + P-NO")
         strat_b = _combined_str(km.no_ask_cents, pm.yes_ask_cents, "K-NO  + P-YES")
@@ -152,14 +157,17 @@ def format_opportunity_log(opp: Opportunity) -> str:
         event_label = f"{km.asset} {km.direction} ${km.threshold:.0f}"
         strategy_detail = f"Kalshi {opp.kalshi_side} + Polymarket {opp.poly_side}"
 
+    k_depth_str = f"{opp.kalshi_depth_shares:.1f}" if opp.kalshi_depth_shares is not None else "?"
+    p_depth_str = f"{opp.poly_depth_shares:.1f}"   if opp.poly_depth_shares  is not None else "?"
+
     return (
         f"ARB OPPORTUNITY | {opp.tier} | {event_label} | "
         f"spread={opp.spread_cents:.2f}c | {opp.hours_to_close:.1f}h to close\n"
         f"  Strategy: {strategy_detail}\n"
         f"  Kalshi:     {km.platform_url}\n"
         f"  Polymarket: {pm.platform_url}\n"
-        f"  Cost: K-{opp.kalshi_side}={opp.kalshi_cost_cents:.1f}c + "
-        f"P-{opp.poly_side}={opp.poly_cost_cents:.1f}c = "
+        f"  Cost: K-{opp.kalshi_side}={opp.kalshi_cost_cents:.1f}c (depth={k_depth_str} shares) + "
+        f"P-{opp.poly_side}={opp.poly_cost_cents:.1f}c (depth={p_depth_str} shares) = "
         f"{opp.combined_cost_cents:.1f}c combined → profit={opp.spread_cents:.2f}c per $1"
     )
 
@@ -197,6 +205,12 @@ def _evaluate_strategy(
     earlier_close = min(k_close, p_close)
     hours_to_close = max(0.0, (earlier_close - now).total_seconds() / 3600)
 
+    # Depth at the relevant ask price
+    km = pair.kalshi
+    pm = pair.poly
+    kalshi_depth = km.yes_ask_depth if kalshi_side == "YES" else km.no_ask_depth
+    poly_depth   = pm.yes_ask_depth if poly_side   == "YES" else pm.no_ask_depth
+
     return Opportunity(
         pair=pair,
         kalshi_side=kalshi_side,
@@ -208,6 +222,8 @@ def _evaluate_strategy(
         tier=tier,
         hours_to_close=round(hours_to_close, 1),
         detected_at=now,
+        kalshi_depth_shares=kalshi_depth,
+        poly_depth_shares=poly_depth,
     )
 
 

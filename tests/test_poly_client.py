@@ -57,9 +57,10 @@ def _make_crypto_gamma(
         "volume": "5000.0",
     }
     # Inject pre-fetched CLOB prices (simulating _enrich_with_clob_prices)
+    # 3-tuple: (ask_cents, bid_cents, ask_depth_shares)
     gm["_clob_prices"] = {
-        yes_token: (yes_ask_cents, yes_bid_cents),
-        no_token: (no_ask_cents, no_bid_cents),
+        yes_token: (yes_ask_cents, yes_bid_cents, None),
+        no_token: (no_ask_cents, no_bid_cents, None),
     }
     return gm
 
@@ -81,10 +82,10 @@ def _make_sports_gamma(
     if token_ids is None:
         token_ids = ["TOKEN_NAVI", "TOKEN_KSM"]
     if prices is None:
-        # NAVI heavily favored
+        # NAVI heavily favored — 3-tuple: (ask_cents, bid_cents, ask_depth_shares)
         prices = {
-            "TOKEN_NAVI": (73.5, 72.0),
-            "TOKEN_KSM": (26.5, 25.0),
+            "TOKEN_NAVI": (73.5, 72.0, None),
+            "TOKEN_KSM": (26.5, 25.0, None),
         }
 
     gm = {
@@ -218,9 +219,10 @@ class TestFetchBook:
         }
         mock_http.get.return_value = mock_resp
 
-        ask, bid = _fetch_book(mock_http, "TOKEN_ID")
+        ask, bid, depth = _fetch_book(mock_http, "TOKEN_ID")
         assert ask == 57.0    # asks[-1] = 0.57 * 100
         assert bid == 55.0    # bids[-1] = 0.55 * 100
+        assert depth == 300.0  # size of the best ask entry
 
     def test_empty_book_returns_none(self):
         mock_http = MagicMock()
@@ -229,17 +231,19 @@ class TestFetchBook:
         mock_resp.json.return_value = {"bids": [], "asks": []}
         mock_http.get.return_value = mock_resp
 
-        ask, bid = _fetch_book(mock_http, "TOKEN_ID")
+        ask, bid, depth = _fetch_book(mock_http, "TOKEN_ID")
         assert ask is None
         assert bid is None
+        assert depth is None
 
     def test_exception_returns_none(self):
         mock_http = MagicMock()
         mock_http.get.side_effect = Exception("Connection error")
 
-        ask, bid = _fetch_book(mock_http, "TOKEN_ID")
+        ask, bid, depth = _fetch_book(mock_http, "TOKEN_ID")
         assert ask is None
         assert bid is None
+        assert depth is None
 
 
 # --- _normalize_gamma_market (crypto) ---

@@ -27,17 +27,24 @@ k_crypto = [m for m in km if m.market_type == MarketType.CRYPTO]
 k_sports = [m for m in km if m.market_type == MarketType.SPORTS]
 print(f"Total Kalshi parseable markets in window: {len(km)} ({len(k_crypto)} crypto, {len(k_sports)} sports)")
 
+def _price_depth(cents, depth) -> str:
+    p = f"{cents}c" if cents is not None else "N/A"
+    d = f"/{depth:.0f}sh" if depth is not None else ""
+    return p + d
+
 if k_crypto:
     print(f"\n  --- Crypto (first 5) ---")
     for m in k_crypto[:5]:
         print(f"  [{m.asset}] {m.direction} ${m.threshold:.0f} | {m.resolution_dt.strftime('%Y-%m-%d %H:%M')} UTC | "
-              f"Y-ask={m.yes_ask_cents}c N-ask={m.no_ask_cents}c | {m.platform_url}")
+              f"Y-ask={_price_depth(m.yes_ask_cents, m.yes_ask_depth)} "
+              f"N-ask={_price_depth(m.no_ask_cents, m.no_ask_depth)} | {m.platform_url}")
 
 if k_sports:
     print(f"\n  --- Sports (first 10) ---")
     for m in k_sports[:10]:
         print(f"  [{m.sport}] {m.team} vs {m.opponent} | {m.resolution_dt.strftime('%Y-%m-%d %H:%M')} UTC | "
-              f"YES-ask={m.yes_ask_cents}c NO-ask={m.no_ask_cents}c | {m.platform_url}")
+              f"YES-ask={_price_depth(m.yes_ask_cents, m.yes_ask_depth)} "
+              f"NO-ask={_price_depth(m.no_ask_cents, m.no_ask_depth)} | {m.platform_url}")
 
 # --- Polymarket ---
 print(f"\n=== POLYMARKET MARKETS (72h window, parseable) ===")
@@ -52,13 +59,15 @@ if p_crypto:
     print(f"\n  --- Crypto (first 5) ---")
     for m in p_crypto[:5]:
         print(f"  [{m.asset}] {m.direction} ${m.threshold:.0f} | {m.resolution_dt.strftime('%Y-%m-%d %H:%M')} UTC | "
-              f"Y-ask={m.yes_ask_cents}c N-ask={m.no_ask_cents}c | {m.platform_url}")
+              f"Y-ask={_price_depth(m.yes_ask_cents, m.yes_ask_depth)} "
+              f"N-ask={_price_depth(m.no_ask_cents, m.no_ask_depth)} | {m.platform_url}")
 
 if p_sports:
     print(f"\n  --- Sports team-entries (first 10) ---")
     for m in p_sports[:10]:
         print(f"  [{m.sport}] {m.team} vs {m.opponent} | {m.resolution_dt.strftime('%Y-%m-%d %H:%M')} UTC | "
-              f"YES-ask={m.yes_ask_cents}c NO-ask={m.no_ask_cents}c | {m.platform_url}")
+              f"YES-ask={_price_depth(m.yes_ask_cents, m.yes_ask_depth)} "
+              f"NO-ask={_price_depth(m.no_ask_cents, m.no_ask_depth)} | {m.platform_url}")
 
 # --- Matching ---
 print(f"\n=== MARKET MATCHING ===")
@@ -78,7 +87,10 @@ if pairs:
         print(f"  {label} | {km_m.resolution_dt.strftime('%Y-%m-%d %H:%M')} UTC")
         print(f"    Kalshi:     {km_m.platform_url}")
         print(f"    Polymarket: {pm_m.platform_url}")
-        print(f"    K-YES={km_m.yes_ask_cents}c K-NO={km_m.no_ask_cents}c | P-YES={pm_m.yes_ask_cents}c P-NO={pm_m.no_ask_cents}c")
+        print(f"    K-YES={_price_depth(km_m.yes_ask_cents, km_m.yes_ask_depth)} "
+              f"K-NO={_price_depth(km_m.no_ask_cents, km_m.no_ask_depth)} | "
+              f"P-YES={_price_depth(pm_m.yes_ask_cents, pm_m.yes_ask_depth)} "
+              f"P-NO={_price_depth(pm_m.no_ask_cents, pm_m.no_ask_depth)}")
 
 # --- Arbitrage ---
 print(f"\n=== ARBITRAGE OPPORTUNITIES ===")

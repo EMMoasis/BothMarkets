@@ -157,18 +157,21 @@ class PolyClient:
 
         def fetch_one(market: NormalizedMarket) -> tuple[str, dict[str, float | None]]:
             yes_ask = no_ask = yes_bid = no_bid = None
+            yes_ask_depth = no_ask_depth = None
 
             if market.yes_token_id:
-                yes_ask, yes_bid = _fetch_book(self._http, market.yes_token_id)
+                yes_ask, yes_bid, yes_ask_depth = _fetch_book(self._http, market.yes_token_id)
 
             if market.no_token_id:
-                no_ask, no_bid = _fetch_book(self._http, market.no_token_id)
+                no_ask, no_bid, no_ask_depth = _fetch_book(self._http, market.no_token_id)
 
             return market.platform_id, {
                 "yes_ask": yes_ask,
                 "no_ask": no_ask,
                 "yes_bid": yes_bid,
                 "no_bid": no_bid,
+                "yes_ask_depth": yes_ask_depth,
+                "no_ask_depth": no_ask_depth,
             }
 
         with ThreadPoolExecutor(max_workers=min(len(markets), FETCH_WORKERS)) as pool:
@@ -237,9 +240,9 @@ class PolyClient:
             all_tokens.update(ids)
 
         # Fetch all in parallel
-        token_prices: dict[str, tuple[float | None, float | None]] = {}
+        token_prices: dict[str, tuple[float | None, float | None, float | None]] = {}
 
-        def fetch_token(tid: str) -> tuple[str, tuple[float | None, float | None]]:
+        def fetch_token(tid: str) -> tuple[str, tuple[float | None, float | None, float | None]]:
             return tid, _fetch_book(self._http, tid)
 
         with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
@@ -250,7 +253,7 @@ class PolyClient:
                     token_prices[tid] = prices
                 except Exception:
                     tid = futures[future]
-                    token_prices[tid] = (None, None)
+                    token_prices[tid] = (None, None, None)
 
         # Inject into each market dict
         enriched_list: list[dict[str, Any]] = []
@@ -385,9 +388,9 @@ def _normalize_sports_market(
         team_norm = normalize_team_name(team_raw)
         opp_norm = normalize_team_name(opp_raw)
 
-        # Prices
-        yes_ask, yes_bid = clob_prices.get(team_token_id, (None, None))
-        no_ask, no_bid = clob_prices.get(opp_token_id, (None, None)) if opp_token_id else (None, None)
+        # Prices and depth at best ask
+        yes_ask, yes_bid, yes_ask_depth = clob_prices.get(team_token_id, (None, None, None))
+        no_ask, no_bid, no_ask_depth = clob_prices.get(opp_token_id, (None, None, None)) if opp_token_id else (None, None, None)
 
         # Synthetic unique platform_id per team entry
         synthetic_id = f"{condition_id}_{team_norm}"
@@ -412,6 +415,8 @@ def _normalize_sports_market(
             no_ask_cents=no_ask,
             yes_bid_cents=yes_bid,
             no_bid_cents=no_bid,
+            yes_ask_depth=yes_ask_depth,
+            no_ask_depth=no_ask_depth,
             yes_token_id=team_token_id,
             no_token_id=opp_token_id,
             liquidity_usd=float(gm.get("liquidity") or 0),
@@ -441,10 +446,11 @@ def _normalize_crypto_market(
     clob_prices: dict[str, tuple[float | None, float | None]] = gm.get("_clob_prices", {})
 
     yes_ask = yes_bid = no_ask = no_bid = None
+    yes_ask_depth = no_ask_depth = None
     if yes_id:
-        yes_ask, yes_bid = clob_prices.get(yes_id, (None, None))
+        yes_ask, yes_bid, yes_ask_depth = clob_prices.get(yes_id, (None, None, None))
     if no_id:
-        no_ask, no_bid = clob_prices.get(no_id, (None, None))
+        no_ask, no_bid, no_ask_depth = clob_prices.get(no_id, (None, None, None))
 
     return NormalizedMarket(
         platform=Platform.POLYMARKET,
@@ -460,6 +466,8 @@ def _normalize_crypto_market(
         no_ask_cents=no_ask,
         yes_bid_cents=yes_bid,
         no_bid_cents=no_bid,
+        yes_ask_depth=yes_ask_depth,
+        no_ask_depth=no_ask_depth,
         yes_token_id=yes_id,
         no_token_id=no_id,
         liquidity_usd=float(gm.get("liquidity") or 0),
@@ -539,14 +547,15 @@ def _detect_sport_from_text(text: str) -> str | None:
     return None
 
 
-def _fetch_book(http: httpx.Client, token_id: str) -> tuple[float | None, float | None]:
+def _fetch_book(http: httpx.Client, token_id: str) -> tuple[float | None, float | None, float | None]:
     """
-    Fetch CLOB orderbook for a single token and return (ask_cents, bid_cents).
+    Fetch CLOB orderbook for a single token and return (ask_cents, bid_cents, ask_depth).
 
     CLOB API:
     - bids sorted ASCENDING  → best bid = bids[-1]  (highest price)
     - asks sorted DESCENDING → best ask = asks[-1]  (lowest price / most competitive)
     Prices are 0-1 float strings → multiply by 100 for cents.
+    ask_depth = total shares available at the best ask price level.
     """
     try:
         resp = http.get(f"{CLOB_API_URL}/book", params={"token_id": token_id})
@@ -557,12 +566,26 @@ def _fetch_book(http: httpx.Client, token_id: str) -> tuple[float | None, float 
         asks = book.get("asks", [])
 
         best_bid = round(float(bids[-1]["price"]) * 100, 4) if bids else None
-        best_ask = round(float(asks[-1]["price"]) * 100, 4) if asks else None
 
-        return best_ask, best_bid
+        if asks:
+            best_ask_entry = asks[-1]
+            best_ask = round(float(best_ask_entry["price"]) * 100, 4)
+            # Sum all size at the best ask price level (price may repeat across entries)
+            best_ask_price_raw = best_ask_entry["price"]
+            ask_depth = sum(
+                float(a["size"])
+                for a in asks
+                if a.get("price") == best_ask_price_raw
+            )
+            ask_depth = round(ask_depth, 2)
+        else:
+            best_ask = None
+            ask_depth = None
+
+        return best_ask, best_bid, ask_depth
     except Exception:
         log.debug("CLOB fetch failed for token %s", token_id[:20], exc_info=True)
-        return None, None
+        return None, None, None
 
 
 def _gamma_in_window(gm: dict[str, Any], now: datetime, cutoff: datetime) -> bool:

@@ -165,11 +165,15 @@ class KalshiClient:
 
     def fetch_live_prices(self, markets: list[NormalizedMarket]) -> dict[str, dict[str, float | None]]:
         """
-        Fetch current yes/no ask prices for a list of Kalshi markets in parallel.
+        Fetch current yes/no ask prices AND orderbook depth for a list of Kalshi markets in parallel.
 
-        Returns {ticker: {"yes_ask": float|None, "no_ask": float|None,
-                           "yes_bid": float|None, "no_bid": float|None}}
-        Prices are in cents (0-100).
+        Makes two parallel calls per ticker:
+          GET /markets/{ticker}          → best ask/bid prices
+          GET /markets/{ticker}/orderbook → depth (shares) at best ask
+
+        Returns {ticker: {"yes_ask", "no_ask", "yes_bid", "no_bid",
+                           "yes_ask_depth", "no_ask_depth"}}
+        Prices are in cents (0-100). Depth is in shares (float).
         """
         if not markets:
             return {}
@@ -178,18 +182,36 @@ class KalshiClient:
 
         def fetch_one(ticker: str) -> tuple[str, dict[str, float | None]]:
             try:
-                resp = self._http.get(f"{KALSHI_BASE_URL}/markets/{ticker}")
-                resp.raise_for_status()
-                data = resp.json().get("market", {})
+                # Fetch price + depth in parallel sub-requests
+                price_resp = self._http.get(f"{KALSHI_BASE_URL}/markets/{ticker}")
+                price_resp.raise_for_status()
+                mkt = price_resp.json().get("market", {})
+
+                yes_ask = _to_cents(mkt.get("yes_ask"))
+                no_ask  = _to_cents(mkt.get("no_ask"))
+                yes_bid = _to_cents(mkt.get("yes_bid"))
+                no_bid  = _to_cents(mkt.get("no_bid"))
+
+                # Fetch orderbook depth
+                yes_ask_depth, no_ask_depth = _fetch_kalshi_depth(
+                    self._http, ticker, yes_ask, no_ask
+                )
+
                 return ticker, {
-                    "yes_ask": _to_cents(data.get("yes_ask")),
-                    "no_ask":  _to_cents(data.get("no_ask")),
-                    "yes_bid": _to_cents(data.get("yes_bid")),
-                    "no_bid":  _to_cents(data.get("no_bid")),
+                    "yes_ask": yes_ask,
+                    "no_ask":  no_ask,
+                    "yes_bid": yes_bid,
+                    "no_bid":  no_bid,
+                    "yes_ask_depth": yes_ask_depth,
+                    "no_ask_depth":  no_ask_depth,
                 }
             except Exception:
                 log.debug("Kalshi: price fetch failed for %s", ticker, exc_info=True)
-                return ticker, {"yes_ask": None, "no_ask": None, "yes_bid": None, "no_bid": None}
+                return ticker, {
+                    "yes_ask": None, "no_ask": None,
+                    "yes_bid": None, "no_bid": None,
+                    "yes_ask_depth": None, "no_ask_depth": None,
+                }
 
         results: dict[str, dict[str, float | None]] = {}
         with ThreadPoolExecutor(max_workers=min(len(tickers), FETCH_WORKERS)) as pool:
@@ -559,4 +581,66 @@ def _to_cents(value: Any) -> float | None:
         f = float(value)
         return f if 0.0 <= f <= 100.0 else None
     except (TypeError, ValueError):
+        return None
+
+
+def _fetch_kalshi_depth(
+    http: httpx.Client,
+    ticker: str,
+    yes_ask_cents: float | None,
+    no_ask_cents: float | None,
+) -> tuple[float | None, float | None]:
+    """
+    Fetch Kalshi orderbook depth for a market and return (yes_ask_depth, no_ask_depth).
+
+    Kalshi orderbook endpoint: GET /markets/{ticker}/orderbook
+    Response structure:
+      {
+        "orderbook": {
+          "yes": [[price_cents, quantity], ...],  # asks for YES (sorted asc)
+          "no":  [[price_cents, quantity], ...],  # asks for NO  (sorted asc)
+        }
+      }
+
+    We find the best ask price (== yes_ask_cents / no_ask_cents from the market endpoint)
+    and sum all quantity at that price level.
+    Depth is in shares (integer quantities from Kalshi = number of contracts).
+    """
+    try:
+        resp = http.get(f"{KALSHI_BASE_URL}/markets/{ticker}/orderbook")
+        resp.raise_for_status()
+        book = resp.json().get("orderbook", {})
+
+        yes_depth = _depth_at_price(book.get("yes", []), yes_ask_cents)
+        no_depth  = _depth_at_price(book.get("no", []),  no_ask_cents)
+
+        return yes_depth, no_depth
+    except Exception:
+        log.debug("Kalshi: orderbook depth fetch failed for %s", ticker, exc_info=True)
+        return None, None
+
+
+def _depth_at_price(
+    levels: list,
+    target_cents: float | None,
+) -> float | None:
+    """
+    Sum all quantity at price levels matching target_cents.
+
+    Kalshi orderbook levels are [[price_cents, quantity], ...].
+    The best ask is the lowest price that sellers are willing to accept.
+    We sum quantity at that exact price level.
+    """
+    if not levels or target_cents is None:
+        return None
+    try:
+        total = 0.0
+        for entry in levels:
+            if len(entry) >= 2:
+                price = float(entry[0])
+                qty   = float(entry[1])
+                if abs(price - target_cents) < 0.5:  # match within 0.5c rounding
+                    total += qty
+        return round(total, 2) if total > 0 else None
+    except (TypeError, ValueError, IndexError):
         return None

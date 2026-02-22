@@ -65,6 +65,10 @@ class NormalizedMarket:
     yes_bid_cents: float | None = None
     no_bid_cents: float | None = None
 
+    # --- Depth at best ask (shares available at that price). None = unknown ---
+    yes_ask_depth: float | None = None   # Shares available at yes_ask price
+    no_ask_depth: float | None = None    # Shares available at no_ask price
+
     # --- Token IDs (Polymarket only, needed for CLOB price fetching) ---
     yes_token_id: str | None = None
     no_token_id: str | None = None
@@ -118,3 +122,7 @@ class Opportunity:
 
     hours_to_close: float       # Hours until the EARLIER of the two close times
     detected_at: datetime       # UTC timestamp when this opportunity was found
+
+    # Depth at the relevant side's ask price (shares available). None = unknown.
+    kalshi_depth_shares: float | None = None
+    poly_depth_shares: float | None = None

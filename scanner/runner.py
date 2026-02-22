@@ -109,6 +109,14 @@ def _save_opportunities_json(opportunities, run_ts: datetime) -> None:
                 "combined_cost_cents": opp.combined_cost_cents,
                 "spread_cents": opp.spread_cents,
                 "hours_to_close": opp.hours_to_close,
+                "kalshi_depth_shares": (
+                    opp.pair.kalshi.yes_ask_depth if opp.kalshi_side == "YES"
+                    else opp.pair.kalshi.no_ask_depth
+                ),
+                "poly_depth_shares": (
+                    opp.pair.poly.yes_ask_depth if opp.poly_side == "YES"
+                    else opp.pair.poly.no_ask_depth
+                ),
                 "asset": opp.pair.kalshi.asset,
                 "direction": opp.pair.kalshi.direction,
                 "threshold": opp.pair.kalshi.threshold,
@@ -177,18 +185,22 @@ def _update_pair_prices(
 
         km_updated = NormalizedMarket(
             **{**pair.kalshi.__dict__,
-               "yes_ask_cents": kp.get("yes_ask", pair.kalshi.yes_ask_cents),
-               "no_ask_cents":  kp.get("no_ask",  pair.kalshi.no_ask_cents),
-               "yes_bid_cents": kp.get("yes_bid", pair.kalshi.yes_bid_cents),
-               "no_bid_cents":  kp.get("no_bid",  pair.kalshi.no_bid_cents),
+               "yes_ask_cents":  kp.get("yes_ask",       pair.kalshi.yes_ask_cents),
+               "no_ask_cents":   kp.get("no_ask",        pair.kalshi.no_ask_cents),
+               "yes_bid_cents":  kp.get("yes_bid",       pair.kalshi.yes_bid_cents),
+               "no_bid_cents":   kp.get("no_bid",        pair.kalshi.no_bid_cents),
+               "yes_ask_depth":  kp.get("yes_ask_depth", pair.kalshi.yes_ask_depth),
+               "no_ask_depth":   kp.get("no_ask_depth",  pair.kalshi.no_ask_depth),
                }
         )
         pm_updated = NormalizedMarket(
             **{**pair.poly.__dict__,
-               "yes_ask_cents": pp.get("yes_ask", pair.poly.yes_ask_cents),
-               "no_ask_cents":  pp.get("no_ask",  pair.poly.no_ask_cents),
-               "yes_bid_cents": pp.get("yes_bid", pair.poly.yes_bid_cents),
-               "no_bid_cents":  pp.get("no_bid",  pair.poly.no_bid_cents),
+               "yes_ask_cents":  pp.get("yes_ask",       pair.poly.yes_ask_cents),
+               "no_ask_cents":   pp.get("no_ask",        pair.poly.no_ask_cents),
+               "yes_bid_cents":  pp.get("yes_bid",       pair.poly.yes_bid_cents),
+               "no_bid_cents":   pp.get("no_bid",        pair.poly.no_bid_cents),
+               "yes_ask_depth":  pp.get("yes_ask_depth", pair.poly.yes_ask_depth),
+               "no_ask_depth":   pp.get("no_ask_depth",  pair.poly.no_ask_depth),
                }
         )
         updated.append(MatchedPair(kalshi=km_updated, poly=pm_updated))
