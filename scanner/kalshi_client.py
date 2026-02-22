@@ -100,6 +100,20 @@ _SERIES_URL_SLUG: dict[str, str] = {
     "KXROCKETLEAGUE": "rocket-league-game",
 }
 
+# Series prefixes that represent individual map/game winner markets (not full series winner)
+_MAP_SERIES_PREFIXES: set[str] = {
+    "KXCS2MAP", "KXLOLMAP", "KXVALORANTMAP", "KXDOTA2MAP",
+}
+
+
+def _get_sport_subtype(series_ticker: str) -> str:
+    """Return 'map' for per-map/game winner markets, 'series' for match/series winner markets."""
+    s = series_ticker.upper()
+    for prefix in _MAP_SERIES_PREFIXES:
+        if s.startswith(prefix):
+            return "map"
+    return "series"
+
 
 class KalshiClient:
     """
@@ -364,6 +378,7 @@ def _normalize_sports(
         team=team_norm,
         opponent=opponent_norm,
         sport=sport,
+        sport_subtype=_get_sport_subtype(series_ticker),
         event_id=event_ticker,
         resolution_dt=resolution_dt,
         yes_ask_cents=_to_cents(raw.get("yes_ask")),

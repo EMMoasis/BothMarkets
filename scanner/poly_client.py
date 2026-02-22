@@ -301,9 +301,12 @@ def _normalize_gamma_market(gm: dict[str, Any]) -> list[NormalizedMarket]:
     platform_url = POLY_MARKET_URL.format(slug=slug) if slug else f"https://polymarket.com/event/{condition_id}"
 
     # Detect sports market
+    # sportsMarketType values:
+    #   "moneyline"       = full series/match winner  → sport_subtype "series"
+    #   "child_moneyline" = individual map/game winner → sport_subtype "map"
     sports_type = (gm.get("sportsMarketType") or "").lower().strip()
     if sports_type in _SPORTS_MARKET_TYPES:
-        return _normalize_sports_market(gm, condition_id, question, resolution_dt, platform_url)
+        return _normalize_sports_market(gm, condition_id, question, resolution_dt, platform_url, sports_type)
 
     # Check category/tags for sports fallback
     sport_code = _detect_sport_from_question(question)
@@ -316,7 +319,7 @@ def _normalize_gamma_market(gm: dict[str, Any]) -> list[NormalizedMarket]:
         # Has multiple non-YES/NO outcomes? Treat as sports moneyline
         outcomes = _parse_json_field(gm.get("outcomes")) or []
         if len(outcomes) >= 2 and not _is_yes_no_market(outcomes):
-            return _normalize_sports_market(gm, condition_id, question, resolution_dt, platform_url)
+            return _normalize_sports_market(gm, condition_id, question, resolution_dt, platform_url, sports_type)
 
     # Crypto/binary market
     result = _normalize_crypto_market(gm, condition_id, question, resolution_dt, platform_url)
@@ -331,6 +334,7 @@ def _normalize_sports_market(
     question: str,
     resolution_dt: datetime,
     platform_url: str,
+    sports_type: str = "moneyline",
 ) -> list[NormalizedMarket]:
     """
     Normalize a Polymarket sports moneyline market into per-team NormalizedMarket objects.
@@ -400,6 +404,8 @@ def _normalize_sports_market(
             team=team_norm,
             opponent=opp_norm,
             sport=sport_code,
+            # "moneyline" = full series/match winner; "child_moneyline" = per map/game winner
+            sport_subtype="map" if sports_type == "child_moneyline" else "series",
             event_id=condition_id,    # condition_id groups both team entries
             resolution_dt=resolution_dt,
             yes_ask_cents=yes_ask,

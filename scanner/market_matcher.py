@@ -9,12 +9,13 @@ For CRYPTO markets (4 criteria):
   3. Resolution datetime within ±RESOLUTION_TIME_TOLERANCE_HOURS
   4. Exact same numeric threshold (e.g., 90000.0)
 
-For SPORTS markets (3 criteria):
+For SPORTS markets (4 criteria):
   1. Same sport code (e.g., "CS2", "NBA")
   2. Same team (normalized name match)
   3. Resolution datetime within ±RESOLUTION_TIME_TOLERANCE_HOURS
-  (opponent is used for display/log but not strict matching since Poly
-   may list same match with slightly different wording)
+  4. Same sport_subtype ("series" = match winner, "map" = per-map/game winner)
+     This prevents matching Kalshi's "KXLOLGAME series winner" against
+     Polymarket's "Game 3 winner" (child_moneyline), which are different bets.
 """
 
 from __future__ import annotations
@@ -149,18 +150,19 @@ class MarketMatcher:
         used_poly: set[str],
     ) -> list[MatchedPair]:
         """
-        Match sports markets:
+        Match sports markets using 4 strict criteria:
           - Same sport code
           - Same normalized team name
           - Resolution datetime within ±RESOLUTION_TIME_TOLERANCE_HOURS
+          - Same sport_subtype ("series" vs "map") — prevents cross-type false matches
 
         The Kalshi market for "Team A wins" (YES market) maps to the Polymarket
         per-team entry for "Team A wins" (yes_token_id = Team A's token).
         """
-        # Pre-group Polymarket sports markets by (sport, team) for fast lookup
-        poly_index: dict[tuple[str, str], list[NormalizedMarket]] = {}
+        # Pre-group Polymarket sports markets by (sport, team, sport_subtype) for fast lookup
+        poly_index: dict[tuple[str, str, str], list[NormalizedMarket]] = {}
         for pm in poly:
-            key = (pm.sport, pm.team)
+            key = (pm.sport, pm.team, pm.sport_subtype)
             poly_index.setdefault(key, []).append(pm)
 
         pairs: list[MatchedPair] = []
@@ -170,16 +172,8 @@ class MarketMatcher:
             if km.platform_id in used_kalshi:
                 continue
 
-            # Look for Poly markets with same sport + team
-            candidates = poly_index.get((km.sport, km.team), [])
-
-            # Also try with opponent (Poly might list teams in different order)
-            if not candidates:
-                # Try to find by checking all poly markets for this sport
-                candidates = [
-                    pm for pm in poly
-                    if pm.sport == km.sport and pm.team == km.team
-                ]
+            # Look for Poly markets with same sport + team + subtype
+            candidates = poly_index.get((km.sport, km.team, km.sport_subtype), [])
 
             for pm in candidates:
                 if pm.platform_id in used_poly:
@@ -241,8 +235,15 @@ def _check_crypto_match(km: NormalizedMarket, pm: NormalizedMarket) -> str | Non
 
 def _check_sports_match(km: NormalizedMarket, pm: NormalizedMarket) -> str | None:
     """
-    Check matching criteria for a sports market pair.
+    Check all 4 criteria for a sports market pair.
     Returns None if all pass, or name of first failing criterion.
+
+    Criteria:
+      1. sport      - same sport code (CS2, LOL, etc.)
+      2. team       - same normalized team name
+      3. date       - resolution_dt within ±RESOLUTION_TIME_TOLERANCE_HOURS
+      4. subtype    - same sport_subtype ("series" vs "map") — prevents
+                      matching a series winner market against a per-map market
     """
     if km.sport != pm.sport:
         return "sport"
@@ -251,6 +252,8 @@ def _check_sports_match(km: NormalizedMarket, pm: NormalizedMarket) -> str | Non
     time_diff = abs((km.resolution_dt - pm.resolution_dt).total_seconds())
     if time_diff > RESOLUTION_TIME_TOLERANCE_HOURS * 3600:
         return "date"
+    if km.sport_subtype != pm.sport_subtype:
+        return "subtype"
     return None
 
 

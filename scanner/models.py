@@ -53,6 +53,7 @@ class NormalizedMarket:
     team: str = ""          # Normalized team name for matching (lower, spaces stripped)
     opponent: str = ""      # Normalized opponent name
     sport: str = ""         # Sport code: "CS2", "NBA", "MLB", "NHL", etc.
+    sport_subtype: str = "" # "series" = match/series winner, "map" = individual map/game winner
     event_id: str = ""      # Platform event group ID (e.g. Kalshi event_ticker)
 
     # --- Resolution ---
