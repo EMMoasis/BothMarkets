@@ -27,24 +27,25 @@ k_crypto = [m for m in km if m.market_type == MarketType.CRYPTO]
 k_sports = [m for m in km if m.market_type == MarketType.SPORTS]
 print(f"Total Kalshi parseable markets in window: {len(km)} ({len(k_crypto)} crypto, {len(k_sports)} sports)")
 
-def _price_depth(cents, depth) -> str:
+def _price_depth(cents, depth, suffix="sh") -> str:
+    """Format price with depth annotation. suffix='ct' for Kalshi contracts, 'sh' for Polymarket shares."""
     p = f"{cents}c" if cents is not None else "N/A"
-    d = f"/{depth:.0f}sh" if depth is not None else ""
+    d = f"/{depth:.0f}{suffix}" if depth is not None else ""
     return p + d
 
 if k_crypto:
     print(f"\n  --- Crypto (first 5) ---")
     for m in k_crypto[:5]:
         print(f"  [{m.asset}] {m.direction} ${m.threshold:.0f} | {m.resolution_dt.strftime('%Y-%m-%d %H:%M')} UTC | "
-              f"Y-ask={_price_depth(m.yes_ask_cents, m.yes_ask_depth)} "
-              f"N-ask={_price_depth(m.no_ask_cents, m.no_ask_depth)} | {m.platform_url}")
+              f"Y-ask={_price_depth(m.yes_ask_cents, m.yes_ask_depth, 'ct')} "
+              f"N-ask={_price_depth(m.no_ask_cents, m.no_ask_depth, 'ct')} | {m.platform_url}")
 
 if k_sports:
     print(f"\n  --- Sports (first 10) ---")
     for m in k_sports[:10]:
         print(f"  [{m.sport}] {m.team} vs {m.opponent} | {m.resolution_dt.strftime('%Y-%m-%d %H:%M')} UTC | "
-              f"YES-ask={_price_depth(m.yes_ask_cents, m.yes_ask_depth)} "
-              f"NO-ask={_price_depth(m.no_ask_cents, m.no_ask_depth)} | {m.platform_url}")
+              f"YES-ask={_price_depth(m.yes_ask_cents, m.yes_ask_depth, 'ct')} "
+              f"NO-ask={_price_depth(m.no_ask_cents, m.no_ask_depth, 'ct')} | {m.platform_url}")
 
 # --- Polymarket ---
 print(f"\n=== POLYMARKET MARKETS (72h window, parseable) ===")
@@ -87,8 +88,8 @@ if pairs:
         print(f"  {label} | {km_m.resolution_dt.strftime('%Y-%m-%d %H:%M')} UTC")
         print(f"    Kalshi:     {km_m.platform_url}")
         print(f"    Polymarket: {pm_m.platform_url}")
-        print(f"    K-YES={_price_depth(km_m.yes_ask_cents, km_m.yes_ask_depth)} "
-              f"K-NO={_price_depth(km_m.no_ask_cents, km_m.no_ask_depth)} | "
+        print(f"    K-YES={_price_depth(km_m.yes_ask_cents, km_m.yes_ask_depth, 'ct')} "
+              f"K-NO={_price_depth(km_m.no_ask_cents, km_m.no_ask_depth, 'ct')} | "
               f"P-YES={_price_depth(pm_m.yes_ask_cents, pm_m.yes_ask_depth)} "
               f"P-NO={_price_depth(pm_m.no_ask_cents, pm_m.no_ask_depth)}")
 

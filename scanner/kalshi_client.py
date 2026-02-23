@@ -591,56 +591,58 @@ def _fetch_kalshi_depth(
     no_ask_cents: float | None,
 ) -> tuple[float | None, float | None]:
     """
-    Fetch Kalshi orderbook depth for a market and return (yes_ask_depth, no_ask_depth).
+    Fetch Kalshi orderbook depth and return (yes_ask_depth, no_ask_depth) in contracts.
 
-    Kalshi orderbook endpoint: GET /markets/{ticker}/orderbook
-    Response structure:
+    Kalshi orderbook: GET /markets/{ticker}/orderbook
+    Response:
       {
         "orderbook": {
-          "yes": [[price_cents, quantity], ...],  # asks for YES (sorted asc)
-          "no":  [[price_cents, quantity], ...],  # asks for NO  (sorted asc)
+          "yes": [[price_cents, qty], ...],   # YES asks, sorted ASCENDING (best ask = first)
+          "no":  [[price_cents, qty], ...],   # NO  asks, sorted ASCENDING (best ask = first)
         }
       }
 
-    We find the best ask price (== yes_ask_cents / no_ask_cents from the market endpoint)
-    and sum all quantity at that price level.
-    Depth is in shares (integer quantities from Kalshi = number of contracts).
+    The best YES ask == the lowest ask price in the "yes" list (index 0).
+    We sum all contracts at that price level as the available depth.
+
+    For untraded markets the orderbook is null — returns (None, None).
     """
     try:
         resp = http.get(f"{KALSHI_BASE_URL}/markets/{ticker}/orderbook")
         resp.raise_for_status()
         book = resp.json().get("orderbook", {})
 
-        yes_depth = _depth_at_price(book.get("yes", []), yes_ask_cents)
-        no_depth  = _depth_at_price(book.get("no", []),  no_ask_cents)
+        yes_depth = _kalshi_depth_at_best_ask(book.get("yes"), yes_ask_cents)
+        no_depth  = _kalshi_depth_at_best_ask(book.get("no"),  no_ask_cents)
 
         return yes_depth, no_depth
     except Exception:
-        log.debug("Kalshi: orderbook depth fetch failed for %s", ticker, exc_info=True)
+        log.debug("Kalshi: orderbook fetch failed for %s", ticker, exc_info=True)
         return None, None
 
 
-def _depth_at_price(
-    levels: list,
-    target_cents: float | None,
+def _kalshi_depth_at_best_ask(
+    levels: list | None,
+    best_ask_cents: float | None,
 ) -> float | None:
     """
-    Sum all quantity at price levels matching target_cents.
+    Sum contracts available at the best ask price level in a Kalshi orderbook side.
 
-    Kalshi orderbook levels are [[price_cents, quantity], ...].
-    The best ask is the lowest price that sellers are willing to accept.
-    We sum quantity at that exact price level.
+    Kalshi levels: [[price_cents, quantity], ...] sorted ASCENDING.
+    Best ask = lowest price = levels[0].
+    We sum qty for all entries at that same price (handles duplicates).
     """
-    if not levels or target_cents is None:
+    if not levels or best_ask_cents is None:
         return None
     try:
-        total = 0.0
-        for entry in levels:
-            if len(entry) >= 2:
-                price = float(entry[0])
-                qty   = float(entry[1])
-                if abs(price - target_cents) < 0.5:  # match within 0.5c rounding
-                    total += qty
+        best_price = float(levels[0][0])
+        total = sum(
+            float(entry[1])
+            for entry in levels
+            if len(entry) >= 2 and abs(float(entry[0]) - best_price) < 0.5
+        )
         return round(total, 2) if total > 0 else None
     except (TypeError, ValueError, IndexError):
         return None
+
+
