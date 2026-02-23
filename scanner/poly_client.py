@@ -28,6 +28,7 @@ from scanner.config import (
     SCAN_WINDOW_HOURS,
 )
 from scanner.kalshi_client import (
+    _extract_map_number,
     extract_asset,
     extract_direction,
     extract_dollar_amount,
@@ -410,6 +411,7 @@ def _normalize_sports_market(
             # "moneyline" = full series/match winner; "child_moneyline" = per map/game winner
             sport_subtype="map" if sports_type == "child_moneyline" else "series",
             event_id=condition_id,    # condition_id groups both team entries
+            map_number=_extract_map_number(question),
             resolution_dt=resolution_dt,
             yes_ask_cents=yes_ask,
             no_ask_cents=no_ask,

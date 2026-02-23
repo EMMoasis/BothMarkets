@@ -191,6 +191,28 @@ class TestCheckSportsMatch:
         pm = _poly_sports(hours=10.5)  # 30 minutes
         assert _check_sports_match(km, pm) is None
 
+    def test_different_map_number_fails(self):
+        km = _kalshi_sports()
+        km.map_number = 1
+        pm = _poly_sports()
+        pm.map_number = 2
+        assert _check_sports_match(km, pm) == "map_number"
+
+    def test_same_map_number_passes(self):
+        km = _kalshi_sports()
+        km.map_number = 2
+        pm = _poly_sports()
+        pm.map_number = 2
+        assert _check_sports_match(km, pm) is None
+
+    def test_one_map_number_none_skips_check(self):
+        # If either has None map_number, skip the check (backward compat)
+        km = _kalshi_sports()
+        km.map_number = 1
+        pm = _poly_sports()
+        pm.map_number = None
+        assert _check_sports_match(km, pm) is None
+
 
 # --- _check_match (dispatcher) ---
 

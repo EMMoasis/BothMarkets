@@ -254,6 +254,9 @@ def _check_sports_match(km: NormalizedMarket, pm: NormalizedMarket) -> str | Non
         return "date"
     if km.sport_subtype != pm.sport_subtype:
         return "subtype"
+    if km.map_number is not None and pm.map_number is not None:
+        if km.map_number != pm.map_number:
+            return "map_number"
     return None
 
 

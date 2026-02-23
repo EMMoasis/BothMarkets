@@ -8,6 +8,7 @@ import pytest
 from scanner.kalshi_client import (
     KalshiClient,
     _extract_both_teams,
+    _extract_map_number,
     _get_sport,
     _normalize_one,
     extract_asset,
@@ -224,6 +225,40 @@ class TestNormalizeTeamName:
 
     def test_strips_trailing_number(self):
         assert normalize_team_name("Cloud9 2") == "cloud9"
+
+    def test_g2_esports_not_empty(self):
+        # "G2 Esports" — previously both words were stripped, producing ""
+        result = normalize_team_name("G2 Esports")
+        assert result != ""
+        assert result == "g2"
+
+    def test_all_strip_words_preserves_result(self):
+        # If filtering would leave nothing, keep the original words
+        result = normalize_team_name("Team Gaming")
+        assert result != ""
+
+
+# --- _extract_map_number ---
+
+class TestExtractMapNumber:
+    def test_kalshi_map_number(self):
+        assert _extract_map_number("Will X win map 2 in the X vs. Y match?") == 2
+
+    def test_poly_map_winner(self):
+        assert _extract_map_number("CS2: X vs Y - Map 1 Winner") == 1
+
+    def test_poly_game_winner(self):
+        assert _extract_map_number("LoL: X vs Y - Game 3 Winner") == 3
+
+    def test_case_insensitive(self):
+        assert _extract_map_number("MAP 5 Winner") == 5
+
+    def test_no_match_returns_none(self):
+        assert _extract_map_number("Will X win the series?") is None
+
+    def test_over_maps_not_matched(self):
+        # "over 2.5 maps" should NOT extract a map number
+        assert _extract_map_number("Will over 2.5 maps be played?") is None
 
 
 # --- _extract_both_teams ---

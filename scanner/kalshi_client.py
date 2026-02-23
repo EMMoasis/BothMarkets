@@ -402,6 +402,7 @@ def _normalize_sports(
         sport=sport,
         sport_subtype=_get_sport_subtype(series_ticker),
         event_id=event_ticker,
+        map_number=_extract_map_number(title),
         resolution_dt=resolution_dt,
         yes_ask_cents=_to_cents(raw.get("yes_ask")),
         no_ask_cents=_to_cents(raw.get("no_ask")),
@@ -448,6 +449,16 @@ def _normalize_crypto(
 # ------------------------------------------------------------------
 # Sports parsing helpers
 # ------------------------------------------------------------------
+
+def _extract_map_number(text: str) -> int | None:
+    """Extract map/game number from a market title.
+
+    Matches patterns like "map 2", "Map 1 Winner", "game 3", "Game 3 Winner".
+    Returns the number as an int, or None if not found.
+    """
+    m = re.search(r'\b(?:map|game)\s+(\d+)\b', text, re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
 
 def _extract_both_teams(title: str) -> tuple[str | None, str | None]:
     """
@@ -503,11 +514,13 @@ def normalize_team_name(name: str) -> str:
     # Collapse multiple spaces
     s = re.sub(r"\s+", " ", s).strip()
     # Remove common wrapper words that don't distinguish teams
-    _STRIP_WORDS = {"team", "esports", "gaming", "fc", "sc", "g2", "the"}
+    _STRIP_WORDS = {"team", "esports", "gaming", "fc", "sc", "the"}
     words = s.split()
-    # Only strip if removing leaves something meaningful (≥1 word)
+    # Only strip if removing leaves at least one word remaining
     if len(words) > 1:
-        words = [w for w in words if w not in _STRIP_WORDS]
+        filtered = [w for w in words if w not in _STRIP_WORDS]
+        if filtered:
+            words = filtered
     s = " ".join(words).strip()
     # Remove trailing numbers after space (e.g. "Cloud9 2" → "cloud9")
     s = re.sub(r"\s+\d+$", "", s).strip()

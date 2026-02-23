@@ -55,6 +55,7 @@ class NormalizedMarket:
     sport: str = ""         # Sport code: "CS2", "NBA", "MLB", "NHL", etc.
     sport_subtype: str = "" # "series" = match/series winner, "map" = individual map/game winner
     event_id: str = ""      # Platform event group ID (e.g. Kalshi event_ticker)
+    map_number: int | None = None  # Map/game number for per-map markets (1, 2, 3, …). None = N/A
 
     # --- Resolution ---
     resolution_dt: datetime = field(default_factory=lambda: datetime.min)
