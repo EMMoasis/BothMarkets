@@ -10,6 +10,15 @@ SCAN_WINDOW_HOURS = 72          # Only include markets closing within this windo
 # --- Market matching tolerance ---
 RESOLUTION_TIME_TOLERANCE_HOURS = 1   # Max difference between Kalshi and Poly close times
 
+# --- Crypto matching ---
+# Disabled: Kalshi resolves via CF Benchmarks BRTI (60-sec multi-exchange average)
+# while Polymarket resolves via Binance 1-min candle close. The two oracles can
+# diverge at settlement, meaning a "covered" position (YES on one, NO on the other
+# at the same threshold) is NOT risk-free. Additionally, Kalshi closes at 5pm ET
+# while Polymarket closes at 12pm ET — a structural 5-hour gap that fails the 1-hour
+# date tolerance. Enable only if you fully understand and accept oracle/timing risk.
+CRYPTO_MATCHING_ENABLED = False
+
 # --- Arbitrage thresholds ---
 # Tiers raised +0.5c vs raw spread to account for cash transfer fees between platforms
 PROFIT_TIERS = [

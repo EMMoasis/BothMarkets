@@ -3,19 +3,27 @@ Cross-platform market matching engine.
 
 Uses strict matching — ALL criteria must pass or the pair is rejected.
 
-For CRYPTO markets (4 criteria):
+For SPORTS markets (6 criteria):
+  1. Same sport code (e.g., "CS2", "LOL", "VALORANT")
+  2. Same team (normalized name match)
+  3. Same opponent (normalized name match) — prevents DRX vs TeamA matching DRX vs TeamB
+  4. Resolution datetime within ±RESOLUTION_TIME_TOLERANCE_HOURS
+  5. Same sport_subtype ("series" = match winner, "map" = per-map/game winner)
+     Prevents matching Kalshi "KXLOLGAME series winner" against Polymarket "Game 3 winner".
+  6. Same map/game number when both markets specify one (e.g., map 2 ≠ game 3)
+
+For CRYPTO markets — DISABLED by default (CRYPTO_MATCHING_ENABLED = False):
+  Kalshi resolves via CF Benchmarks BRTI (60-sec multi-exchange average).
+  Polymarket resolves via Binance 1-min candle BTC/USDT close.
+  These are DIFFERENT oracles: they can diverge at settlement, so a "covered"
+  position is NOT risk-free. Additionally there is a structural ~5-hour gap
+  between platform expiry times. See config.CRYPTO_MATCHING_ENABLED.
+
+  When enabled, checks 4 criteria:
   1. Exact same asset (e.g., "BTC")
   2. Same direction ("ABOVE" or "BELOW")
   3. Resolution datetime within ±RESOLUTION_TIME_TOLERANCE_HOURS
   4. Exact same numeric threshold (e.g., 90000.0)
-
-For SPORTS markets (4 criteria):
-  1. Same sport code (e.g., "CS2", "NBA")
-  2. Same team (normalized name match)
-  3. Resolution datetime within ±RESOLUTION_TIME_TOLERANCE_HOURS
-  4. Same sport_subtype ("series" = match winner, "map" = per-map/game winner)
-     This prevents matching Kalshi's "KXLOLGAME series winner" against
-     Polymarket's "Game 3 winner" (child_moneyline), which are different bets.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from scanner.config import RESOLUTION_TIME_TOLERANCE_HOURS
+from scanner.config import CRYPTO_MATCHING_ENABLED, RESOLUTION_TIME_TOLERANCE_HOURS
 from scanner.models import MarketType, MatchedPair, NormalizedMarket
 
 log = logging.getLogger(__name__)
@@ -67,9 +75,17 @@ class MarketMatcher:
         used_kalshi: set[str] = set()
         used_poly: set[str] = set()
 
-        # Match crypto markets
-        crypto_pairs = self._match_crypto(k_crypto, p_crypto, used_kalshi, used_poly)
-        pairs.extend(crypto_pairs)
+        # Match crypto markets (disabled by default — different oracles, see module docstring)
+        if CRYPTO_MATCHING_ENABLED:
+            crypto_pairs = self._match_crypto(k_crypto, p_crypto, used_kalshi, used_poly)
+            pairs.extend(crypto_pairs)
+        else:
+            crypto_pairs = []
+            log.debug(
+                "Crypto matching disabled (CRYPTO_MATCHING_ENABLED=False). "
+                "K=%d crypto markets, P=%d crypto markets skipped.",
+                len(k_crypto), len(p_crypto),
+            )
 
         # Match sports markets
         sports_pairs = self._match_sports(k_sports, p_sports, used_kalshi, used_poly)
@@ -235,20 +251,28 @@ def _check_crypto_match(km: NormalizedMarket, pm: NormalizedMarket) -> str | Non
 
 def _check_sports_match(km: NormalizedMarket, pm: NormalizedMarket) -> str | None:
     """
-    Check all 4 criteria for a sports market pair.
+    Check all 6 criteria for a sports market pair.
     Returns None if all pass, or name of first failing criterion.
 
     Criteria:
       1. sport      - same sport code (CS2, LOL, etc.)
-      2. team       - same normalized team name
-      3. date       - resolution_dt within ±RESOLUTION_TIME_TOLERANCE_HOURS
-      4. subtype    - same sport_subtype ("series" vs "map") — prevents
+      2. team       - same normalized team name (the team this YES contract is for)
+      3. opponent   - same normalized opponent — prevents DRX vs TeamA matching DRX vs TeamB
+                      when the same team plays twice in the scan window. Skipped when
+                      either market has no opponent set.
+      4. date       - resolution_dt within ±RESOLUTION_TIME_TOLERANCE_HOURS
+      5. subtype    - same sport_subtype ("series" vs "map") — prevents
                       matching a series winner market against a per-map market
+      6. map_number - same map/game number when both markets specify one
     """
     if km.sport != pm.sport:
         return "sport"
     if km.team != pm.team:
         return "team"
+    # Opponent check: both must play the same opposing team.
+    # Skip only when a market genuinely has no opponent (shouldn't happen for 2-team markets).
+    if km.opponent and pm.opponent and km.opponent != pm.opponent:
+        return "opponent"
     time_diff = abs((km.resolution_dt - pm.resolution_dt).total_seconds())
     if time_diff > RESOLUTION_TIME_TOLERANCE_HOURS * 3600:
         return "date"

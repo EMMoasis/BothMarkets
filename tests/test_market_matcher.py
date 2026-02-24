@@ -1,6 +1,7 @@
 """Tests for strict market matching — crypto and sports."""
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -213,6 +214,30 @@ class TestCheckSportsMatch:
         pm.map_number = None
         assert _check_sports_match(km, pm) is None
 
+    # --- Opponent check ---
+
+    def test_different_opponent_fails(self):
+        """DRX vs TeamA should not match DRX vs TeamB — same team, different game."""
+        km = _kalshi_sports(team="m80", opponent="voca")
+        pm = _poly_sports(team="m80", opponent="fnatic")   # different opponent
+        assert _check_sports_match(km, pm) == "opponent"
+
+    def test_same_opponent_passes(self):
+        km = _kalshi_sports(team="m80", opponent="voca")
+        pm = _poly_sports(team="m80", opponent="voca")
+        assert _check_sports_match(km, pm) is None
+
+    def test_opponent_check_skipped_when_kalshi_opponent_empty(self):
+        """If Kalshi has no opponent (shouldn't happen but defensive), skip check."""
+        km = _kalshi_sports(team="m80", opponent="")
+        pm = _poly_sports(team="m80", opponent="fnatic")
+        assert _check_sports_match(km, pm) is None
+
+    def test_opponent_check_skipped_when_poly_opponent_empty(self):
+        km = _kalshi_sports(team="m80", opponent="voca")
+        pm = _poly_sports(team="m80", opponent="")
+        assert _check_sports_match(km, pm) is None
+
 
 # --- _check_match (dispatcher) ---
 
@@ -235,14 +260,29 @@ class TestCheckMatch:
 
 # --- MarketMatcher.find_matches (crypto) ---
 
+_CRYPTO_ENABLED = "scanner.market_matcher.CRYPTO_MATCHING_ENABLED"
+
+
 class TestMarketMatcherCrypto:
+    """
+    Crypto matching is disabled by default (different oracles: BRTI vs Binance).
+    Tests that exercise the matching logic patch CRYPTO_MATCHING_ENABLED=True.
+    """
     def setup_method(self):
         self.matcher = MarketMatcher()
 
-    def test_perfect_match(self):
+    def test_disabled_by_default_returns_no_crypto_pairs(self):
+        """With CRYPTO_MATCHING_ENABLED=False (default) crypto pairs are never produced."""
         km = _kalshi_crypto()
         pm = _poly_crypto()
         pairs = self.matcher.find_matches([km], [pm])
+        assert len(pairs) == 0
+
+    def test_perfect_match_when_enabled(self):
+        km = _kalshi_crypto()
+        pm = _poly_crypto()
+        with patch(_CRYPTO_ENABLED, True):
+            pairs = self.matcher.find_matches([km], [pm])
         assert len(pairs) == 1
         assert pairs[0].kalshi.platform_id == "KXBTC-26FEB21-T90000"
         assert pairs[0].poly.platform_id == "0xPOLY1"
@@ -250,38 +290,44 @@ class TestMarketMatcherCrypto:
     def test_no_match_different_asset(self):
         km = _kalshi_crypto(asset="BTC")
         pm = _poly_crypto(asset="ETH")
-        assert self.matcher.find_matches([km], [pm]) == []
+        with patch(_CRYPTO_ENABLED, True):
+            assert self.matcher.find_matches([km], [pm]) == []
 
     def test_no_match_different_threshold(self):
         km = _kalshi_crypto(threshold=90000.0)
         pm = _poly_crypto(threshold=85000.0)
-        assert self.matcher.find_matches([km], [pm]) == []
+        with patch(_CRYPTO_ENABLED, True):
+            assert self.matcher.find_matches([km], [pm]) == []
 
-    def test_multiple_crypto_matches(self):
+    def test_multiple_crypto_matches_when_enabled(self):
         km1 = _kalshi_crypto(ticker="K1", asset="BTC", threshold=90000.0)
         km2 = _kalshi_crypto(ticker="K2", asset="ETH", threshold=3000.0)
         pm1 = _poly_crypto(condition_id="P1", asset="BTC", threshold=90000.0)
         pm2 = _poly_crypto(condition_id="P2", asset="ETH", threshold=3000.0)
-        pairs = self.matcher.find_matches([km1, km2], [pm1, pm2])
+        with patch(_CRYPTO_ENABLED, True):
+            pairs = self.matcher.find_matches([km1, km2], [pm1, pm2])
         assert len(pairs) == 2
 
     def test_dedup_kalshi_matches_only_once(self):
         km = _kalshi_crypto(ticker="K1")
         pm1 = _poly_crypto(condition_id="P1")
         pm2 = _poly_crypto(condition_id="P2")
-        pairs = self.matcher.find_matches([km], [pm1, pm2])
+        with patch(_CRYPTO_ENABLED, True):
+            pairs = self.matcher.find_matches([km], [pm1, pm2])
         assert len(pairs) == 1
 
     def test_empty_returns_empty(self):
-        assert self.matcher.find_matches([], [_poly_crypto()]) == []
-        assert self.matcher.find_matches([_kalshi_crypto()], []) == []
+        with patch(_CRYPTO_ENABLED, True):
+            assert self.matcher.find_matches([], [_poly_crypto()]) == []
+            assert self.matcher.find_matches([_kalshi_crypto()], []) == []
 
-    def test_logs_urls(self, caplog):
+    def test_logs_urls_when_enabled(self, caplog):
         import logging
         km = _kalshi_crypto()
         pm = _poly_crypto()
         with caplog.at_level(logging.INFO, logger="scanner.market_matcher"):
-            self.matcher.find_matches([km], [pm])
+            with patch(_CRYPTO_ENABLED, True):
+                self.matcher.find_matches([km], [pm])
         assert "kalshi.com/markets/" in caplog.text
         assert "polymarket.com/event/" in caplog.text
 
@@ -337,16 +383,28 @@ class TestMixedMarkets:
     def setup_method(self):
         self.matcher = MarketMatcher()
 
-    def test_crypto_and_sports_matched_separately(self):
+    def test_crypto_and_sports_matched_separately_when_crypto_enabled(self):
+        """When CRYPTO_MATCHING_ENABLED=True, both crypto and sports pairs are found."""
+        km_c = _kalshi_crypto()
+        km_s = _kalshi_sports()
+        pm_c = _poly_crypto()
+        pm_s = _poly_sports()
+        with patch(_CRYPTO_ENABLED, True):
+            pairs = self.matcher.find_matches([km_c, km_s], [pm_c, pm_s])
+        assert len(pairs) == 2
+        types = {p.kalshi.market_type for p in pairs}
+        assert MarketType.CRYPTO in types
+        assert MarketType.SPORTS in types
+
+    def test_crypto_disabled_sports_still_match(self):
+        """With CRYPTO_MATCHING_ENABLED=False (default), only sports pairs are found."""
         km_c = _kalshi_crypto()
         km_s = _kalshi_sports()
         pm_c = _poly_crypto()
         pm_s = _poly_sports()
         pairs = self.matcher.find_matches([km_c, km_s], [pm_c, pm_s])
-        assert len(pairs) == 2
-        types = {p.kalshi.market_type for p in pairs}
-        assert MarketType.CRYPTO in types
-        assert MarketType.SPORTS in types
+        assert len(pairs) == 1
+        assert pairs[0].kalshi.market_type == MarketType.SPORTS
 
     def test_crypto_does_not_match_sports(self):
         # Kalshi crypto vs Poly sports — should produce 0 matches
