@@ -358,6 +358,60 @@ class TestNormalizeOneCrypto:
         assert m.direction == "BELOW"
         assert m.threshold == 3000.0
 
+    # --- New subtitle-based parsing (real Kalshi format as of 2026) ---
+
+    def test_btc_subtitle_above(self):
+        """Real Kalshi format: title has asset, subtitle has direction+threshold."""
+        raw = _make_crypto_raw(
+            ticker="KXBTCD-26FEB2417-T75749.99",
+            title="Bitcoin price  on Feb 24, 2026?",
+            series_ticker="KXBTCD",
+        )
+        raw["subtitle"] = "$75,750 or above"
+        m = _normalize_one(raw)
+        assert m is not None
+        assert m.asset == "BTC"
+        assert m.direction == "ABOVE"
+        assert m.threshold == 75750.0
+
+    def test_eth_subtitle_above(self):
+        """ETH daily market with subtitle."""
+        raw = _make_crypto_raw(
+            ticker="KXETHD-26FEB2417-T2659.99",
+            title="Ethereum price at Feb 24, 2026 at 5pm EST?",
+            series_ticker="KXETHD",
+        )
+        raw["subtitle"] = "$2,660 or above"
+        m = _normalize_one(raw)
+        assert m is not None
+        assert m.asset == "ETH"
+        assert m.direction == "ABOVE"
+        assert m.threshold == 2660.0
+
+    def test_btc_subtitle_below(self):
+        """BTC market where subtitle says 'below'."""
+        raw = _make_crypto_raw(
+            ticker="KXBTCD-26FEB2417-T60000",
+            title="Bitcoin price  on Feb 24, 2026?",
+            series_ticker="KXBTCD",
+        )
+        raw["subtitle"] = "$60,000 or below"
+        m = _normalize_one(raw)
+        assert m is not None
+        assert m.asset == "BTC"
+        assert m.direction == "BELOW"
+        assert m.threshold == 60000.0
+
+    def test_no_subtitle_and_no_direction_in_title_returns_none(self):
+        """With new format, if subtitle is empty and title has no direction, returns None."""
+        raw = _make_crypto_raw(
+            ticker="KXBTCD-26FEB2417-T75749.99",
+            title="Bitcoin price  on Feb 24, 2026?",
+            series_ticker="KXBTCD",
+        )
+        # No subtitle set → combined has no direction or threshold → None
+        assert _normalize_one(raw) is None
+
 
 # --- _normalize_one (sports) ---
 

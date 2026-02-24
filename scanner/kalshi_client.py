@@ -419,19 +419,31 @@ def _normalize_crypto(
     title: str,
     resolution_dt: datetime,
 ) -> NormalizedMarket | None:
-    """Normalize a Kalshi crypto price market."""
-    asset = extract_asset(title)
-    direction = extract_direction(title)
-    threshold = extract_dollar_amount(title)
+    """Normalize a Kalshi crypto price market.
+
+    Kalshi crypto markets split the question across two fields:
+      title:    "Bitcoin price on Feb 24, 2026?"      ← asset name lives here
+      subtitle: "$75,750 or above"                    ← direction + threshold live here
+
+    We combine both fields so all three components can be extracted.
+    """
+    subtitle = (raw.get("subtitle") or "").strip()
+    combined = f"{title} {subtitle}".strip()
+
+    asset = extract_asset(combined)
+    direction = extract_direction(combined)
+    threshold = extract_dollar_amount(combined)
 
     if asset is None or direction is None or threshold is None:
         return None
+
+    raw_question = combined if subtitle else title
 
     return NormalizedMarket(
         platform=Platform.KALSHI,
         platform_id=ticker,
         platform_url=KALSHI_MARKET_URL.format(ticker=ticker),
-        raw_question=title,
+        raw_question=raw_question,
         market_type=MarketType.CRYPTO,
         asset=asset,
         direction=direction,
