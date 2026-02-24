@@ -6,6 +6,7 @@ dependencies = [
     "httpx",
     "python-dotenv",
     "py-clob-client",
+    "cryptography",
 ]
 
 [project.optional-dependencies]

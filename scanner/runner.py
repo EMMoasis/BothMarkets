@@ -21,6 +21,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from scanner.config import (
+    ENV_KALSHI_API_KEY,
+    ENV_KALSHI_API_SECRET,
+    ENV_POLY_API_KEY,
+    ENV_POLY_API_PASSPHRASE,
+    ENV_POLY_API_SECRET,
+    ENV_POLY_FUNDER,
+    ENV_POLY_PRIVATE_KEY,
+    EXEC_MAX_TRADE_USD,
     FETCH_WORKERS,
     LOG_FILE,
     MARKET_REFRESH_SECONDS,
@@ -45,6 +53,8 @@ class _OppsFilter(logging.Filter):
     _KEYWORDS = (
         "MATCH |", "PAIR  |", "ARB OPPORTUNITY",
         "SCAN CYCLE", "=== MARKET REFRESH",
+        "EXEC |", "EXEC FILLED", "EXEC SKIP",
+        "Kalshi order:", "Poly order:", "Kalshi unwind",
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -212,6 +222,52 @@ def _update_pair_prices(
 # Main loop
 # ------------------------------------------------------------------
 
+def _init_executor():
+    """
+    Try to initialize the arbitrage executor with credentials from env.
+    Returns ArbExecutor instance if all credentials are present, else None.
+    Trading remains disabled (scan-only) when any credential is missing.
+    """
+    from scanner.arb_executor import ArbExecutor
+    from scanner.kalshi_trader import KalshiTrader
+    from scanner.poly_trader import PolyTrader
+
+    k_key    = os.environ.get(ENV_KALSHI_API_KEY)
+    k_secret = os.environ.get(ENV_KALSHI_API_SECRET)
+    p_key    = os.environ.get(ENV_POLY_API_KEY)
+    p_secret = os.environ.get(ENV_POLY_API_SECRET)
+    p_pass   = os.environ.get(ENV_POLY_API_PASSPHRASE)
+    p_priv   = os.environ.get(ENV_POLY_PRIVATE_KEY)
+    p_funder = os.environ.get(ENV_POLY_FUNDER)
+
+    if not all([k_key, k_secret, p_key, p_secret, p_pass, p_priv]):
+        log.info("Trading DISABLED — one or more credentials missing (scan-only mode)")
+        return None
+
+    try:
+        k_trader = KalshiTrader(api_key=k_key, api_secret_pem=k_secret)
+        p_trader = PolyTrader(
+            private_key=p_priv,
+            api_key=p_key,
+            api_secret=p_secret,
+            api_passphrase=p_pass,
+            funder=p_funder,
+        )
+        executor = ArbExecutor(
+            kalshi=k_trader,
+            poly=p_trader,
+            max_trade_usd=EXEC_MAX_TRADE_USD,
+        )
+        log.info(
+            "Trading ENABLED — max $%.2f per trade, kalshi_key=%s...",
+            EXEC_MAX_TRADE_USD, k_key[:8],
+        )
+        return executor
+    except Exception:
+        log.exception("Failed to initialize executor — running in scan-only mode")
+        return None
+
+
 def main() -> None:
     _load_env()
     _setup_logging()
@@ -225,11 +281,13 @@ def main() -> None:
     poly = PolyClient()
     matcher = MarketMatcher()
     finder = OpportunityFinder()
+    executor = _init_executor()  # None = scan-only mode
 
     matched_pairs: list[MatchedPair] = []
     last_market_refresh: float = 0.0
     price_cycle = 0
     total_opportunities = 0
+    total_trades = 0
 
     while True:
         now_mono = time.monotonic()
@@ -257,6 +315,8 @@ def main() -> None:
         # --- Fast path: fetch live prices and check for arb every 2 seconds ---
         if matched_pairs:
             price_cycle += 1
+            if executor is not None:
+                executor.tick()
             cycle_start = time.monotonic()
 
             try:
@@ -270,17 +330,47 @@ def main() -> None:
                 for pair in live_pairs:
                     finder.log_pair_prices(pair)
 
-                # Log and persist opportunities
+                # Log, execute, and persist opportunities
                 if opportunities:
                     scan_ts = datetime.now(timezone.utc)
                     for opp in opportunities:
                         log.info("ARB OPPORTUNITY | %s", format_opportunity_log(opp))
+
+                        # Execute if trading is enabled and pair not on cooldown
+                        if executor is not None:
+                            if executor.is_on_cooldown(opp):
+                                log.info(
+                                    "EXEC SKIP (cooldown) | %s",
+                                    opp.pair.kalshi.platform_id,
+                                )
+                                continue
+                            try:
+                                result = executor.execute(opp)
+                                total_trades += 1
+                                log.info(
+                                    "EXEC RESULT #%d | status=%s reason=%s "
+                                    "units=%d cost=$%.4f profit=$%.4f | "
+                                    "K=%s P=%s",
+                                    total_trades, result.status, result.reason,
+                                    result.units, result.total_cost_usd,
+                                    result.guaranteed_profit_usd,
+                                    result.kalshi_order_id or "N/A",
+                                    result.poly_order_id or "N/A",
+                                )
+                            except Exception:
+                                log.exception(
+                                    "Executor raised for %s",
+                                    opp.pair.kalshi.platform_id,
+                                )
+
                     _save_opportunities_json(opportunities, scan_ts)
 
                 elapsed = round(time.monotonic() - cycle_start, 3)
                 log.info(
-                    "SCAN CYCLE #%d | %.3fs | %d pairs | %d arb opportunities | %d lifetime",
-                    price_cycle, elapsed, len(live_pairs), len(opportunities), total_opportunities,
+                    "SCAN CYCLE #%d | %.3fs | %d pairs | %d arb opportunities | "
+                    "%d lifetime | %d trades",
+                    price_cycle, elapsed, len(live_pairs), len(opportunities),
+                    total_opportunities, total_trades,
                 )
 
             except Exception:
