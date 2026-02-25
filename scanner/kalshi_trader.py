@@ -158,7 +158,9 @@ class KalshiTrader:
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         full_path = f"{_API_PATH_PREFIX}{path}"
         body_json = json.dumps(body, separators=(",", ":"))
-        ts, sig = self._sign("POST", full_path, body_json)
+        # Kalshi signs with EMPTY body string regardless of request body content.
+        # Including the body in the signing message causes a 401 INCORRECT_API_KEY_SIGNATURE.
+        ts, sig = self._sign("POST", full_path, "")
         resp = self._http.post(
             f"{KALSHI_BASE_URL}{path}",
             content=body_json,
@@ -169,6 +171,7 @@ class KalshiTrader:
 
     def _delete(self, path: str) -> dict[str, Any]:
         full_path = f"{_API_PATH_PREFIX}{path}"
+        # Same as POST: Kalshi always signs with empty body.
         ts, sig = self._sign("DELETE", full_path, "")
         resp = self._http.delete(
             f"{KALSHI_BASE_URL}{path}",

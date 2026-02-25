@@ -43,12 +43,13 @@ class TestInit:
                 api_key="k",
                 api_secret="s",
                 api_passphrase="p",
-                funder="0xfund",
+                funder="0xfund",   # accepted for backward compat, not forwarded
             )
             assert trader is not None
-            # ClobClient should have been called with funder
+            # sig_type=0: funder is NOT passed to ClobClient (EOA mode)
             call_kwargs = MockClient.call_args.kwargs
-            assert call_kwargs.get("funder") == "0xfund"
+            assert call_kwargs.get("signature_type") == 0
+            assert "funder" not in call_kwargs
 
     def test_initializes_without_funder(self):
         """funder is optional — should not be passed to ClobClient when absent."""
@@ -62,6 +63,22 @@ class TestInit:
             )
             call_kwargs = MockClient.call_args.kwargs
             assert "funder" not in call_kwargs
+
+    def test_auto_derives_keys_when_none_supplied(self):
+        """When api_key/secret/passphrase are blank, auto-derive from private key."""
+        with patch("scanner.poly_trader.ClobClient") as MockClient:
+            mock_l1 = MagicMock()
+            mock_creds = MagicMock()
+            mock_creds.api_key = "auto-key"
+            mock_creds.api_secret = "auto-secret"
+            mock_creds.api_passphrase = "auto-pass"
+            mock_l1.derive_api_key.return_value = mock_creds
+            MockClient.return_value = mock_l1
+
+            trader = PolyTrader(private_key="0xkey")   # no api_key supplied
+            assert trader is not None
+            # derive_api_key should have been called
+            mock_l1.derive_api_key.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

@@ -125,6 +125,20 @@ class ArbExecutor:
         if not poly_token_id:
             return ExecutionResult(status="error", reason="missing_poly_token_id")
 
+        # Guard: Polymarket wallet must have enough USDC to cover at least one leg
+        try:
+            poly_bal = self._poly.get_usdc_balance()
+        except Exception as exc:
+            log.warning("EXEC | Could not fetch Poly balance: %s — skipping", exc)
+            return ExecutionResult(status="skipped", reason="poly_balance_check_failed")
+
+        if poly_bal < EXEC_POLY_MIN_ORDER_USD:
+            log.warning(
+                "EXEC SKIP | Poly wallet balance $%.2f < min $%.2f — deposit USDC to wallet",
+                poly_bal, EXEC_POLY_MIN_ORDER_USD,
+            )
+            return ExecutionResult(status="skipped", reason="poly_insufficient_balance")
+
         # Position sizing
         units = _calc_units(
             k_price_cents, p_price_cents,

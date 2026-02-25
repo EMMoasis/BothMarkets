@@ -87,6 +87,8 @@ def _make_opportunity(
 def _make_executor(max_trade_usd: float = 5.0) -> tuple[ArbExecutor, MagicMock, MagicMock]:
     k_trader = MagicMock()
     p_trader = MagicMock()
+    # Default: enough balance to pass the guard (tests that need $0 override explicitly)
+    p_trader.get_usdc_balance.return_value = 100.0
     executor = ArbExecutor(kalshi=k_trader, poly=p_trader, max_trade_usd=max_trade_usd)
     return executor, k_trader, p_trader
 
@@ -230,9 +232,46 @@ class TestExecuteHappyPath:
 # ---------------------------------------------------------------------------
 
 class TestExecuteFailurePaths:
+    def test_poly_insufficient_balance_returns_skipped(self):
+        """If Poly wallet balance < $1, skip before placing any order."""
+        executor, k_trader, p_trader = _make_executor()
+        opp = _make_opportunity()
+        p_trader.get_usdc_balance.return_value = 0.50   # below $1 minimum
+
+        result = executor.execute(opp)
+
+        assert result.status == "skipped"
+        assert result.reason == "poly_insufficient_balance"
+        k_trader.place_order.assert_not_called()
+        p_trader.place_order.assert_not_called()
+
+    def test_poly_balance_check_exception_returns_skipped(self):
+        """If Poly balance check throws, skip safely without placing any order."""
+        executor, k_trader, p_trader = _make_executor()
+        opp = _make_opportunity()
+        p_trader.get_usdc_balance.side_effect = Exception("network error")
+
+        result = executor.execute(opp)
+
+        assert result.status == "skipped"
+        assert result.reason == "poly_balance_check_failed"
+        k_trader.place_order.assert_not_called()
+
+    def test_sufficient_poly_balance_proceeds(self):
+        """If Poly wallet balance >= $1, execution proceeds normally."""
+        executor, k_trader, p_trader = _make_executor()
+        opp = _make_opportunity()
+        p_trader.get_usdc_balance.return_value = 10.0   # well above minimum
+        k_trader.place_order.return_value = {"order": {"order_id": "k-1"}}
+        p_trader.place_order.return_value = {"orderID": "p-1"}
+
+        result = executor.execute(opp)
+        assert result.status == "filled"
+
     def test_insufficient_units_returns_skipped(self):
         """If calculated units < 1, return skipped."""
         executor, k_trader, p_trader = _make_executor(max_trade_usd=0.01)
+        p_trader.get_usdc_balance.return_value = 10.0   # balance OK, units will be 0
         # Very tiny budget → 0 units
         opp = _make_opportunity(k_cost=55.0, p_cost=40.0)
         result = executor.execute(opp)

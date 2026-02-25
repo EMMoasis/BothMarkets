@@ -3,19 +3,21 @@
 Uses the same ClobClient pattern as the polytrader project.
 
 Credentials (environment variables):
-  POLY_PRIVATE_KEY     — Ethereum private key (0x...)
-  POLY_API_KEY         — CLOB API key
+  POLY_PRIVATE_KEY     — Ethereum private key (hex, no 0x prefix required)
+  POLY_API_KEY         — CLOB API key  (auto-created on first init if blank)
   POLY_API_SECRET      — CLOB API secret
   POLY_API_PASSPHRASE  — CLOB API passphrase
-  POLY_FUNDER          — Funder wallet address (for USDC collateral)
 
 Order flow:
-  1. client.create_order(OrderArgs(token_id, price_0_to_1, size, BUY))
+  1. client.create_order(OrderArgs(token_id, price_0_to_1, size, BUY/SELL))
   2. client.post_order(signed_order, orderType=OrderType.FOK)
   3. Query fill: client.get_order(order_id)
 
 Prices are always in 0-1 float range (0.55 = 55c).
 Sizes are share counts (float, Polymarket minimum ~$1/leg).
+
+NOTE: Uses signature_type=0 (EOA).  Orders require on-chain USDC in the wallet.
+      Deposit USDC (Polygon) to the wallet address before trading.
 """
 
 from __future__ import annotations
@@ -37,6 +39,31 @@ log = logging.getLogger(__name__)
 
 CLOB_HOST = "https://clob.polymarket.com"
 POLY_CHAIN_ID = 137  # Polygon mainnet
+_KEY_NONCE = 0       # Deterministic nonce for derive/create
+
+
+def _build_creds(private_key: str) -> ApiCreds:
+    """
+    Derive (or create) EOA API credentials for the given private key.
+
+    Tries derive_api_key first (idempotent).  Falls back to create_api_key
+    if the key doesn't exist yet.  Always uses signature_type=0 (EOA).
+    """
+    l1 = ClobClient(
+        host=CLOB_HOST,
+        chain_id=POLY_CHAIN_ID,
+        key=private_key.strip(),
+        signature_type=0,
+    )
+    try:
+        c = l1.derive_api_key(nonce=_KEY_NONCE)
+        log.info("PolyTrader: derived existing API key %s (nonce=%d)", c.api_key, _KEY_NONCE)
+        return ApiCreds(api_key=c.api_key, api_secret=c.api_secret, api_passphrase=c.api_passphrase)
+    except Exception:
+        pass
+    c = l1.create_api_key(nonce=_KEY_NONCE)
+    log.info("PolyTrader: created new API key %s (nonce=%d)", c.api_key, _KEY_NONCE)
+    return ApiCreds(api_key=c.api_key, api_secret=c.api_secret, api_passphrase=c.api_passphrase)
 
 
 class PolyTrader:
@@ -47,32 +74,40 @@ class PolyTrader:
     Sizes are share counts (float).
 
     Uses FOK (Fill or Kill) order type: either fills immediately or is cancelled.
+    Uses signature_type=0 (EOA) — the wallet must hold USDC on Polygon for orders
+    to succeed.  On init, API credentials are auto-derived from the private key
+    so no manual key management is needed.
     """
 
     def __init__(
         self,
         private_key: str,
-        api_key: str,
-        api_secret: str,
-        api_passphrase: str,
-        funder: str | None = None,
+        api_key: str = "",
+        api_secret: str = "",
+        api_passphrase: str = "",
+        funder: str | None = None,   # kept for backward compat; unused in sig_type=0
     ) -> None:
-        creds = ApiCreds(
-            api_key=api_key.strip(),
-            api_secret=api_secret.strip(),
-            api_passphrase=api_passphrase.strip(),
+        pk = private_key.strip()
+        # Auto-create/derive keys if not supplied
+        if api_key and api_secret and api_passphrase:
+            creds = ApiCreds(
+                api_key=api_key.strip(),
+                api_secret=api_secret.strip(),
+                api_passphrase=api_passphrase.strip(),
+            )
+        else:
+            log.info("PolyTrader: no API key supplied — auto-deriving from private key")
+            creds = _build_creds(pk)
+
+        self._client = ClobClient(
+            host=CLOB_HOST,
+            chain_id=POLY_CHAIN_ID,
+            key=pk,
+            creds=creds,
+            signature_type=0,   # EOA: signs orders directly with the wallet key
         )
-        kwargs: dict[str, Any] = {
-            "host": CLOB_HOST,
-            "chain_id": POLY_CHAIN_ID,
-            "key": private_key.strip(),
-            "creds": creds,
-            "signature_type": 2,
-        }
-        if funder:
-            kwargs["funder"] = funder.strip()
-        self._client = ClobClient(**kwargs)
-        log.info("PolyTrader initialized, funder=%s", funder or "EOA")
+        log.info("PolyTrader initialized (sig_type=0/EOA, wallet=%s)",
+                 self._client.get_address() if hasattr(self._client, "get_address") else "?")
 
     # ------------------------------------------------------------------
     # Public API
