@@ -182,8 +182,28 @@ class ArbExecutor:
             log.warning("EXEC | Kalshi leg failed: %s", exc)
             return ExecutionResult(status="skipped", reason="kalshi_leg_failed")
 
-        # Small pause before Polymarket leg (match settlement)
+        # Small pause then verify actual Kalshi fill (partial fills leave remainder resting)
         time.sleep(0.5)
+        try:
+            k_order_info = self._kalshi.get_order(k_order_id)
+            order_data = k_order_info.get("order", {})
+            remaining = int(order_data.get("remaining_count") or 0)
+            filled = units - remaining
+            if remaining > 0:
+                # Cancel the unfilled resting portion so it doesn't fill later unhedged
+                try:
+                    self._kalshi.cancel_order(k_order_id)
+                    log.info("EXEC | Kalshi partial fill %d/%d — cancelled resting %d", filled, units, remaining)
+                except Exception as ce:
+                    log.warning("EXEC | Could not cancel resting Kalshi remainder: %s", ce)
+            if filled < 1:
+                log.warning("EXEC | Kalshi order placed but 0 contracts filled — aborting")
+                return ExecutionResult(status="skipped", reason="kalshi_no_fill")
+            if filled != units:
+                log.info("EXEC | Adjusting Poly size from %d to %d (actual Kalshi fill)", units, filled)
+                units = filled
+        except Exception as exc:
+            log.warning("EXEC | Could not verify Kalshi fill count (%s) — using requested %d units", exc, units)
 
         # ---- Leg 2: Polymarket ----
         p_price_frac = p_price_cents / 100.0

@@ -89,6 +89,8 @@ def _make_executor(max_trade_usd: float = 5.0) -> tuple[ArbExecutor, MagicMock, 
     p_trader = MagicMock()
     # Default: enough balance to pass the guard (tests that need $0 override explicitly)
     p_trader.get_usdc_balance.return_value = 100.0
+    # Default: Kalshi order fully filled (remaining_count=0)
+    k_trader.get_order.return_value = {"order": {"remaining_count": 0}}
     executor = ArbExecutor(kalshi=k_trader, poly=p_trader, max_trade_usd=max_trade_usd)
     return executor, k_trader, p_trader
 
@@ -384,3 +386,66 @@ class TestCooldowns:
             executor.tick()
 
         assert not executor.is_on_cooldown(opp)
+
+
+# ---------------------------------------------------------------------------
+# Partial Kalshi fill
+# ---------------------------------------------------------------------------
+
+class TestPartialKalshiFill:
+    def test_partial_fill_sizes_poly_to_actual_fill(self):
+        """If Kalshi fills 3 of 5 contracts, Poly order should be placed for 3."""
+        executor, k_trader, p_trader = _make_executor(max_trade_usd=5.0)
+        opp = _make_opportunity(k_cost=55.0, p_cost=40.0)
+
+        k_trader.place_order.return_value = {"order": {"order_id": "k-partial"}}
+        k_trader.get_order.return_value = {"order": {"remaining_count": 2}}
+        p_trader.place_order.return_value = {"orderID": "p-1"}
+
+        result = executor.execute(opp)
+
+        assert result.status == "filled"
+        assert result.units == 3
+        p_call = p_trader.place_order.call_args
+        assert p_call.kwargs["size"] == 3.0
+
+    def test_partial_fill_cancels_resting_remainder(self):
+        """Resting remainder on Kalshi should be cancelled to avoid future unhedged fill."""
+        executor, k_trader, p_trader = _make_executor()
+        opp = _make_opportunity()
+
+        k_trader.place_order.return_value = {"order": {"order_id": "k-partial"}}
+        k_trader.get_order.return_value = {"order": {"remaining_count": 1}}
+        p_trader.place_order.return_value = {"orderID": "p-1"}
+
+        executor.execute(opp)
+
+        k_trader.cancel_order.assert_called_once_with("k-partial")
+
+    def test_zero_fill_returns_skipped(self):
+        """If Kalshi fills 0 contracts, skip without placing Poly order."""
+        executor, k_trader, p_trader = _make_executor(max_trade_usd=5.0)
+        opp = _make_opportunity(k_cost=55.0, p_cost=40.0)
+
+        k_trader.place_order.return_value = {"order": {"order_id": "k-zero"}}
+        k_trader.get_order.return_value = {"order": {"remaining_count": 5}}
+        p_trader.place_order.return_value = {"orderID": "p-1"}
+
+        result = executor.execute(opp)
+
+        assert result.status == "skipped"
+        assert result.reason == "kalshi_no_fill"
+        p_trader.place_order.assert_not_called()
+
+    def test_full_fill_does_not_cancel(self):
+        """If Kalshi fills all contracts, cancel_order should not be called."""
+        executor, k_trader, p_trader = _make_executor()
+        opp = _make_opportunity()
+
+        k_trader.place_order.return_value = {"order": {"order_id": "k-full"}}
+        k_trader.get_order.return_value = {"order": {"remaining_count": 0}}
+        p_trader.place_order.return_value = {"orderID": "p-1"}
+
+        executor.execute(opp)
+
+        k_trader.cancel_order.assert_not_called()
