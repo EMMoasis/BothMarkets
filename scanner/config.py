@@ -49,12 +49,12 @@ OPPS_LOG_FILE = "opportunities.log"   # Filtered: matched pairs + arb opportunit
 OPPS_JSON_FILE = "opportunities.json" # NDJSON: one object per scan run
 
 # --- Execution layer ---
-# Maximum total USD spend per trade (both legs combined). Small for testing.
-EXEC_MAX_TRADE_USD: float = 5.0
+# Maximum total USD spend per trade (both legs combined).
+EXEC_MAX_TRADE_USD: float = 20.0
 # Minimum per Polymarket leg in USD (Polymarket rejects orders below ~$1)
 EXEC_POLY_MIN_ORDER_USD: float = 1.0
 # Cycles to wait before re-executing on the same pair (1 cycle ≈ 2 seconds)
-EXEC_COOLDOWN_CYCLES: int = 15          # ~30s default cooldown
+EXEC_COOLDOWN_CYCLES: int = 5           # ~10s cooldown between trades on same pair
 # Seconds to wait before attempting to unwind a failed Kalshi leg
 EXEC_UNWIND_DELAY_SECONDS: float = 2.0
 

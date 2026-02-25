@@ -150,7 +150,7 @@ units = min(
 )
 ```
 
-- Max total spend per trade: `$5.00` (configurable via `EXEC_MAX_TRADE_USD` in `config.py`)
+- Max total spend per trade: `$20.00` (configurable via `EXEC_MAX_TRADE_USD` in `config.py`)
 - Polymarket minimum order: `$1.00` per leg (`EXEC_POLY_MIN_ORDER_USD`)
 - If calculated units don't meet the Polymarket minimum, the trade is skipped
 
@@ -168,7 +168,7 @@ units = min(
 | **Balance check** | Reads Polymarket USDC balance before every trade. Skips if below `$1.00` to prevent a Kalshi-buys-but-Poly-fails loss cycle. |
 | **Partial fill guard** | After placing the Kalshi order, queries actual fill count. If Kalshi partially filled, cancels the resting remainder and sizes the Polymarket leg to match the actual fill — preventing unhedged exposure. If zero contracts filled, aborts without touching Polymarket. |
 | **Kalshi unwind** | If Leg 1 (Kalshi) fills but Leg 2 (Polymarket) fails, automatically sells the Kalshi position back at current bid. Retries up to 3 times. Status becomes `"unwound"` on success or `"partial_stuck"` on failure (requires manual intervention). |
-| **Pair cooldown** | After each trade attempt, the pair is locked for 15 price cycles (~30 seconds). After a failed trade (unwind triggered), the cooldown is doubled. |
+| **Pair cooldown** | After each successful trade, the pair is locked for 5 price cycles (~10 seconds). After a failed trade (unwind triggered), the cooldown is doubled (~20 seconds). |
 | **429 backoff** | On Kalshi API rate limit errors during market refresh, waits 30 seconds before retrying instead of hammering the API. |
 
 ### Execution Result Statuses
@@ -244,9 +244,9 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `RESOLUTION_TIME_TOLERANCE_HOURS` | `1` | Max close-time difference for a valid match |
 | `CRYPTO_MATCHING_ENABLED` | `False` | Enable/disable crypto market matching |
 | `MIN_SPREAD_CENTS` | `0.8` | Minimum spread to report an opportunity |
-| `EXEC_MAX_TRADE_USD` | `5.0` | Maximum combined spend per trade (both legs) |
+| `EXEC_MAX_TRADE_USD` | `20.0` | Maximum combined spend per trade (both legs) |
 | `EXEC_POLY_MIN_ORDER_USD` | `1.0` | Minimum Polymarket order size per leg |
-| `EXEC_COOLDOWN_CYCLES` | `15` | Price cycles to wait between trades on same pair (~30s) |
+| `EXEC_COOLDOWN_CYCLES` | `5` | Price cycles to wait between trades on same pair (~10s) |
 | `EXEC_UNWIND_DELAY_SECONDS` | `2.0` | Delay before first Kalshi unwind attempt |
 | `FETCH_WORKERS` | `20` | Parallel threads for CLOB price fetching |
 
