@@ -34,8 +34,8 @@ def _make_trader() -> tuple[PolyTrader, MagicMock]:
 # ---------------------------------------------------------------------------
 
 class TestInit:
-    def test_initializes_with_all_creds(self):
-        """PolyTrader initializes without error when all creds provided."""
+    def test_initializes_with_funder_uses_sig_type_2(self):
+        """When funder is provided, sig_type=2 (proxy mode) is used."""
         with patch("scanner.poly_trader.ClobClient") as MockClient:
             MockClient.return_value = MagicMock()
             trader = PolyTrader(
@@ -43,16 +43,16 @@ class TestInit:
                 api_key="k",
                 api_secret="s",
                 api_passphrase="p",
-                funder="0xfund",   # accepted for backward compat, not forwarded
+                funder="0xfund",
             )
             assert trader is not None
-            # sig_type=0: funder is NOT passed to ClobClient (EOA mode)
+            # sig_type=2: funder IS passed to ClobClient
             call_kwargs = MockClient.call_args.kwargs
-            assert call_kwargs.get("signature_type") == 0
-            assert "funder" not in call_kwargs
+            assert call_kwargs.get("signature_type") == 2
+            assert call_kwargs.get("funder") == "0xfund"
 
-    def test_initializes_without_funder(self):
-        """funder is optional — should not be passed to ClobClient when absent."""
+    def test_initializes_without_funder_uses_sig_type_0(self):
+        """When no funder, sig_type=0 (EOA mode) is used and funder not passed."""
         with patch("scanner.poly_trader.ClobClient") as MockClient:
             MockClient.return_value = MagicMock()
             PolyTrader(
@@ -62,6 +62,7 @@ class TestInit:
                 api_passphrase="p",
             )
             call_kwargs = MockClient.call_args.kwargs
+            assert call_kwargs.get("signature_type") == 0
             assert "funder" not in call_kwargs
 
     def test_auto_derives_keys_when_none_supplied(self):
