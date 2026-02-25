@@ -311,6 +311,8 @@ def main() -> None:
 
             except Exception:
                 log.exception("Market refresh failed")
+                # Back off 30 s before retrying (avoids hammering APIs on 429s)
+                last_market_refresh = time.monotonic() - MARKET_REFRESH_SECONDS + 30
 
         # --- Fast path: fetch live prices and check for arb every 2 seconds ---
         if matched_pairs:
