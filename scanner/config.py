@@ -28,6 +28,7 @@ PROFIT_TIERS = [
     ("Low",        0.8, 1.5),
 ]
 MIN_SPREAD_CENTS = 0.8          # Ignore anything below this
+MIN_PRICE_CENTS = 5.0           # Skip legs priced below this (near-zero tokens can't meet Poly $1 min)
 
 # --- Kalshi API ---
 KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"

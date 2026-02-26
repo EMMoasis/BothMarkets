@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from scanner.config import MIN_SPREAD_CENTS, PROFIT_TIERS
+from scanner.config import MIN_PRICE_CENTS, MIN_SPREAD_CENTS, PROFIT_TIERS
 from scanner.models import MarketType, MatchedPair, NormalizedMarket, Opportunity
 
 log = logging.getLogger(__name__)
@@ -192,6 +192,10 @@ def _evaluate_strategy(
 ) -> Opportunity | None:
     """Evaluate one strategy direction. Returns Opportunity or None."""
     if kalshi_cost is None or poly_cost is None:
+        return None
+
+    # Skip near-zero prices: Poly min-order sizing becomes impossibly large
+    if kalshi_cost < MIN_PRICE_CENTS or poly_cost < MIN_PRICE_CENTS:
         return None
 
     combined = kalshi_cost + poly_cost

@@ -179,8 +179,12 @@ class ArbExecutor:
                 log.warning("EXEC | Kalshi order response missing order_id: %s", k_resp)
                 return ExecutionResult(status="error", reason="kalshi_no_order_id")
         except Exception as exc:
-            log.warning("EXEC | Kalshi leg failed: %s", exc)
-            return ExecutionResult(status="skipped", reason="kalshi_leg_failed")
+            # 409 = position limit hit or market non-tradeable — cool down longer
+            is_conflict = "409" in str(exc)
+            log.warning("EXEC | Kalshi leg failed (%s): %s",
+                        "409 conflict" if is_conflict else "error", exc)
+            self._set_cooldown(opp, EXEC_COOLDOWN_CYCLES * 6 if is_conflict else 1)
+            return ExecutionResult(status="skipped", reason="kalshi_conflict" if is_conflict else "kalshi_leg_failed")
 
         # Small pause then verify actual Kalshi fill (partial fills leave remainder resting)
         time.sleep(0.5)
