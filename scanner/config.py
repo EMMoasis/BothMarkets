@@ -22,12 +22,12 @@ CRYPTO_MATCHING_ENABLED = False
 # --- Arbitrage thresholds ---
 # Tiers raised +0.5c vs raw spread to account for cash transfer fees between platforms
 PROFIT_TIERS = [
-    ("Ultra High", 5.5, float("inf")),
-    ("High",       2.5, 5.5),
-    ("Mid",        1.5, 2.5),
-    ("Low",        0.8, 1.5),
+    ("Ultra High", 7.5, float("inf")),
+    ("High",       4.5, 7.5),
+    ("Mid",        3.5, 4.5),
+    ("Low",        2.8, 3.5),
 ]
-MIN_SPREAD_CENTS = 0.8          # Ignore anything below this
+MIN_SPREAD_CENTS = 2.8          # Ignore anything below this
 MIN_PRICE_CENTS = 5.0           # Skip legs priced below this (near-zero tokens can't meet Poly $1 min)
 
 # --- Kalshi API ---
@@ -48,6 +48,7 @@ FETCH_WORKERS = 20              # Max parallel threads for CLOB price fetching
 LOG_FILE = "scanner.log"
 OPPS_LOG_FILE = "opportunities.log"   # Filtered: matched pairs + arb opportunities only
 OPPS_JSON_FILE = "opportunities.json" # NDJSON: one object per scan run
+DB_FILE = "scanner.db"                # SQLite: opportunities + trades tables
 
 # --- Execution layer ---
 # Maximum total USD spend per trade (both legs combined).

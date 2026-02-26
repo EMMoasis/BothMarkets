@@ -44,6 +44,7 @@ Then one of those contracts always pays out 100c, locking in a 3c profit per sha
 | `scanner/market_matcher.py` | 6-criteria sports matching; 4-criteria crypto matching (disabled by default) |
 | `scanner/models.py` | `NormalizedMarket`, `MatchedPair`, `Opportunity` dataclasses |
 | `scanner/config.py` | All constants (timing, thresholds, env var names, API URLs) |
+| `scanner/db.py` | SQLite persistence — `init_db`, `log_opportunity`, `log_trade` |
 
 ---
 
@@ -69,16 +70,16 @@ BTC, ETH, SOL, XRP, DOGE price-level markets. Disabled via `CRYPTO_MATCHING_ENAB
 
 ## Opportunity Tiers
 
-Tiers are adjusted +0.5c above raw spread to account for cross-platform fund transfer fees:
+Tiers are adjusted +2.5c above raw spread to account for cross-platform fund transfer fees and ensure only high-quality trades are executed:
 
 | Tier | Spread |
 |------|--------|
-| Ultra High | > 5.5c |
-| High | 2.5c – 5.5c |
-| Mid | 1.5c – 2.5c |
-| Low | 0.8c – 1.5c |
+| Ultra High | > 7.5c |
+| High | 4.5c – 7.5c |
+| Mid | 3.5c – 4.5c |
+| Low | 2.8c – 3.5c |
 
-Opportunities below 0.8c (`MIN_SPREAD_CENTS`) are ignored.
+Opportunities below 2.8c (`MIN_SPREAD_CENTS`) are ignored.
 
 ---
 
@@ -204,6 +205,48 @@ The scanner loads `.env` automatically from the project root on startup.
 | `scanner.log` | All log output (debug + info for every component) |
 | `opportunities.log` | Filtered log: matched pairs, arbitrage opportunities, and execution events only |
 | `opportunities.json` | NDJSON — one JSON object per price cycle that found opportunities, with full opportunity details |
+| `scanner.db` | SQLite database — `opportunities` and `trades` tables (see below) |
+
+### SQLite Database (`scanner.db`)
+
+**`opportunities` table** — every arb opportunity detected (whether traded or not):
+
+| Column | Description |
+|--------|-------------|
+| `scanned_at` | UTC timestamp of detection |
+| `kalshi_ticker` | Kalshi market ticker |
+| `poly_token_id` | Polymarket token ID |
+| `kalshi_title` / `poly_title` | Raw market question text |
+| `strategy` | `A` (K-YES + P-NO) or `B` (K-NO + P-YES) |
+| `kalshi_side` / `poly_side` | Which side was bought on each platform |
+| `kalshi_cost_cents` / `poly_cost_cents` | Price at detection time |
+| `spread_cents` | Guaranteed profit per share in cents |
+| `tier` | Low / Mid / High / Ultra High |
+| `kalshi_depth_contracts` | Contracts available at that Kalshi ask price |
+| `poly_depth_shares` | Shares available at that Poly ask price |
+| `tradeable_units` | `min(k_depth, p_depth)` — max fillable at this spread |
+| `max_locked_profit_usd` | `tradeable_units × spread / 100` — total capturable profit |
+| `hours_to_close` | Hours until earlier market closes |
+| `kalshi_close_time` / `poly_close_time` | Market resolution timestamps |
+| `executed` | `1` if a trade was attempted, `0` if scan-only |
+
+**`trades` table** — every trade execution attempt:
+
+| Column | Description |
+|--------|-------------|
+| `opportunity_id` | FK → `opportunities.id` |
+| `traded_at` | UTC timestamp of execution |
+| `kalshi_ticker` / `poly_token_id` | Market identifiers |
+| `kalshi_side` / `poly_side` | Sides traded |
+| `requested_units` | Units calculated before placing order |
+| `kalshi_filled` / `poly_filled` | Actual contracts/shares filled |
+| `kalshi_price_cents` / `poly_price_cents` | Prices at execution time |
+| `kalshi_cost_usd` / `poly_cost_usd` / `total_cost_usd` | USD spent per leg and combined |
+| `locked_profit_usd` | Guaranteed profit locked in (0 if not filled) |
+| `kalshi_order_id` / `poly_order_id` | Platform order IDs |
+| `status` | `filled` / `skipped` / `unwound` / `partial_stuck` / `error` |
+| `reason` | Skip/fail reason code |
+| `poly_balance_before` | Poly USDC balance before trade |
 
 ---
 
@@ -243,7 +286,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `SCAN_WINDOW_HOURS` | `72` | Only include markets closing within this window |
 | `RESOLUTION_TIME_TOLERANCE_HOURS` | `1` | Max close-time difference for a valid match |
 | `CRYPTO_MATCHING_ENABLED` | `False` | Enable/disable crypto market matching |
-| `MIN_SPREAD_CENTS` | `0.8` | Minimum spread to report an opportunity |
+| `MIN_SPREAD_CENTS` | `2.8` | Minimum spread to report an opportunity |
 | `EXEC_MAX_TRADE_USD` | `50.0` | Maximum combined spend per trade (both legs) |
 | `EXEC_POLY_MIN_ORDER_USD` | `1.0` | Minimum Polymarket order size per leg |
 | `EXEC_COOLDOWN_CYCLES` | `5` | Price cycles to wait between trades on same pair (~10s) |

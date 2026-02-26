@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from scanner.config import (
+    DB_FILE,
     ENV_KALSHI_API_KEY,
     ENV_KALSHI_API_SECRET,
     ENV_POLY_API_KEY,
@@ -36,6 +37,7 @@ from scanner.config import (
     OPPS_LOG_FILE,
     PRICE_POLL_SECONDS,
 )
+from scanner.db import init_db, log_opportunity, log_trade, mark_opportunity_executed
 from scanner.kalshi_client import KalshiClient
 from scanner.market_matcher import MarketMatcher
 from scanner.models import MatchedPair
@@ -282,6 +284,7 @@ def main() -> None:
     matcher = MarketMatcher()
     finder = OpportunityFinder()
     executor = _init_executor()  # None = scan-only mode
+    db = init_db(DB_FILE)
 
     matched_pairs: list[MatchedPair] = []
     last_market_refresh: float = 0.0
@@ -338,6 +341,9 @@ def main() -> None:
                     for opp in opportunities:
                         log.info("ARB OPPORTUNITY | %s", format_opportunity_log(opp))
 
+                        # Record every opportunity in the DB (executed flag updated below)
+                        opp_id = log_opportunity(db, opp, executed=False)
+
                         # Execute if trading is enabled and pair not on cooldown
                         if executor is not None:
                             if executor.is_on_cooldown(opp):
@@ -359,6 +365,9 @@ def main() -> None:
                                     result.kalshi_order_id or "N/A",
                                     result.poly_order_id or "N/A",
                                 )
+                                # Persist trade and mark opportunity as executed
+                                mark_opportunity_executed(db, opp_id)
+                                log_trade(db, opp_id, opp, result)
                             except Exception:
                                 log.exception(
                                     "Executor raised for %s",

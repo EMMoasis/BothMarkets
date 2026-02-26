@@ -111,33 +111,33 @@ def _make_sports_pair(
 
 class TestClassifyTier:
     def test_ultra_high(self):
-        assert _classify_tier(6.0) == "Ultra High"
+        assert _classify_tier(8.0) == "Ultra High"
 
     def test_ultra_high_boundary(self):
-        assert _classify_tier(5.5) == "Ultra High"
+        assert _classify_tier(7.5) == "Ultra High"
 
     def test_high(self):
-        assert _classify_tier(4.0) == "High"
+        assert _classify_tier(5.0) == "High"
 
     def test_high_lower_boundary(self):
-        assert _classify_tier(2.5) == "High"
+        assert _classify_tier(4.5) == "High"
 
     def test_mid(self):
-        assert _classify_tier(2.0) == "Mid"
+        assert _classify_tier(3.8) == "Mid"
 
     def test_mid_lower_boundary(self):
-        assert _classify_tier(1.5) == "Mid"
+        assert _classify_tier(3.5) == "Mid"
 
     def test_low(self):
-        assert _classify_tier(1.0) == "Low"
+        assert _classify_tier(3.0) == "Low"
 
     def test_low_lower_boundary(self):
-        assert _classify_tier(0.8) == "Low"
+        assert _classify_tier(2.8) == "Low"
 
     def test_below_threshold_returns_none(self):
-        assert _classify_tier(0.7) is None
+        assert _classify_tier(2.7) is None
         assert _classify_tier(0.0) is None
-        assert _classify_tier(0.1) is None
+        assert _classify_tier(0.8) is None
 
 
 # --- _evaluate_strategy ---
@@ -145,12 +145,12 @@ class TestClassifyTier:
 class TestEvaluateStrategy:
     def test_profitable_strategy(self):
         pair = _make_crypto_pair(k_yes_ask=57.0, p_no_ask=40.0)
-        # 57 + 40 = 97c → spread = 3c
+        # 57 + 40 = 97c → spread = 3c → "Low" tier (2.8–3.5c)
         opp = _evaluate_strategy(pair, 57.0, 40.0, "YES", "NO")
         assert opp is not None
         assert opp.combined_cost_cents == 97.0
         assert opp.spread_cents == 3.0
-        assert opp.tier == "High"
+        assert opp.tier == "Low"
         assert opp.kalshi_side == "YES"
         assert opp.poly_side == "NO"
 
