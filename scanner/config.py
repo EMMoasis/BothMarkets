@@ -50,7 +50,7 @@ OPPS_JSON_FILE = "opportunities.json" # NDJSON: one object per scan run
 
 # --- Execution layer ---
 # Maximum total USD spend per trade (both legs combined).
-EXEC_MAX_TRADE_USD: float = 20.0
+EXEC_MAX_TRADE_USD: float = 50.0
 # Minimum per Polymarket leg in USD (Polymarket rejects orders below ~$1)
 EXEC_POLY_MIN_ORDER_USD: float = 1.0
 # Cycles to wait before re-executing on the same pair (1 cycle ≈ 2 seconds)

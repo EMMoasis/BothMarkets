@@ -150,7 +150,7 @@ units = min(
 )
 ```
 
-- Max total spend per trade: `$20.00` (configurable via `EXEC_MAX_TRADE_USD` in `config.py`)
+- Max total spend per trade: `$50.00` (configurable via `EXEC_MAX_TRADE_USD` in `config.py`)
 - Polymarket minimum order: `$1.00` per leg (`EXEC_POLY_MIN_ORDER_USD`)
 - If calculated units don't meet the Polymarket minimum, the trade is skipped
 
@@ -244,7 +244,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `RESOLUTION_TIME_TOLERANCE_HOURS` | `1` | Max close-time difference for a valid match |
 | `CRYPTO_MATCHING_ENABLED` | `False` | Enable/disable crypto market matching |
 | `MIN_SPREAD_CENTS` | `0.8` | Minimum spread to report an opportunity |
-| `EXEC_MAX_TRADE_USD` | `20.0` | Maximum combined spend per trade (both legs) |
+| `EXEC_MAX_TRADE_USD` | `50.0` | Maximum combined spend per trade (both legs) |
 | `EXEC_POLY_MIN_ORDER_USD` | `1.0` | Minimum Polymarket order size per leg |
 | `EXEC_COOLDOWN_CYCLES` | `5` | Price cycles to wait between trades on same pair (~10s) |
 | `EXEC_UNWIND_DELAY_SECONDS` | `2.0` | Delay before first Kalshi unwind attempt |
