@@ -7,3 +7,16 @@ opportunities.json
 .venv/
 dist/
 build/
+
+# SQLite runtime files
+*.db
+*.db-shm
+*.db-wal
+
+# Temp/scratch scripts
+tmp_*.py
+
+# Misc
+NUL
+*.txt
+.claude/
