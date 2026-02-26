@@ -50,6 +50,10 @@ OPPS_LOG_FILE = "opportunities.log"   # Filtered: matched pairs + arb opportunit
 OPPS_JSON_FILE = "opportunities.json" # NDJSON: one object per scan run
 DB_FILE = "scanner.db"                # SQLite: opportunities + trades tables
 
+# --- Fees ---
+# Kalshi charges 1.75% of face value (contracts × $1) on taker fills.
+KALSHI_TAKER_FEE_RATE: float = 0.0175
+
 # --- Execution layer ---
 # Maximum total USD spend per trade (both legs combined).
 EXEC_MAX_TRADE_USD: float = 50.0

@@ -11,6 +11,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
+from scanner.config import KALSHI_TAKER_FEE_RATE
 from scanner.models import Opportunity
 
 log = logging.getLogger(__name__)
@@ -27,8 +28,32 @@ def init_db(path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")   # concurrent reads without blocking
     conn.execute("PRAGMA foreign_keys=ON")
     _create_tables(conn)
+    _migrate(conn)
     log.info("DB | Initialized at %s", path)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add new columns to existing DBs without breaking old data."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
+    migrations = [
+        ("kalshi_fee_usd", "REAL"),
+        ("net_profit_usd", "REAL"),
+    ]
+    for col, typ in migrations:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {typ}")
+            log.info("DB | Migration: added column trades.%s", col)
+    # Backfill fee and net profit for existing filled rows
+    if "kalshi_fee_usd" not in existing:
+        conn.execute("""
+            UPDATE trades
+            SET kalshi_fee_usd = ROUND(kalshi_filled * ?, 4),
+                net_profit_usd = ROUND(locked_profit_usd - (kalshi_filled * ?), 4)
+            WHERE status = 'filled' AND kalshi_filled IS NOT NULL
+        """, (KALSHI_TAKER_FEE_RATE, KALSHI_TAKER_FEE_RATE))
+        log.info("DB | Migration: backfilled kalshi_fee_usd and net_profit_usd for existing rows")
+    conn.commit()
 
 
 def _create_tables(conn: sqlite3.Connection) -> None:
@@ -73,7 +98,9 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             kalshi_cost_usd       REAL,                    -- USD spent on Kalshi leg
             poly_cost_usd         REAL,                    -- USD spent on Poly leg
             total_cost_usd        REAL,
-            locked_profit_usd     REAL,                    -- guaranteed profit (0 if not filled)
+            locked_profit_usd     REAL,                    -- guaranteed profit before fees (0 if not filled)
+            kalshi_fee_usd        REAL,                    -- Kalshi taker fee (1.75% of face value)
+            net_profit_usd        REAL,                    -- locked_profit_usd - kalshi_fee_usd
             kalshi_order_id       TEXT,
             poly_order_id         TEXT,
             status                TEXT,                    -- filled/skipped/unwound/partial_stuck/error
@@ -202,6 +229,11 @@ def log_trade(
     kalshi_filled = result.units if result.status in ("filled", "unwound", "partial_stuck") else None
     poly_filled   = result.units if result.status == "filled" else None
 
+    # Kalshi fee = 1.75% of face value (filled contracts × $1)
+    kalshi_fee_usd = round(kalshi_filled * KALSHI_TAKER_FEE_RATE, 4) if kalshi_filled else None
+    locked = result.guaranteed_profit_usd or None
+    net_profit_usd = round(locked - (kalshi_fee_usd or 0.0), 4) if locked is not None else None
+
     try:
         cur = conn.execute(
             """
@@ -212,11 +244,11 @@ def log_trade(
                 requested_units, kalshi_filled, poly_filled,
                 kalshi_price_cents, poly_price_cents,
                 kalshi_cost_usd, poly_cost_usd, total_cost_usd,
-                locked_profit_usd,
+                locked_profit_usd, kalshi_fee_usd, net_profit_usd,
                 kalshi_order_id, poly_order_id,
                 status, reason,
                 kalshi_balance_before, poly_balance_before
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 opp_id if opp_id >= 0 else None,
@@ -233,7 +265,9 @@ def log_trade(
                 result.kalshi_cost_usd or None,
                 result.poly_cost_usd or None,
                 result.total_cost_usd or None,
-                result.guaranteed_profit_usd or None,
+                locked,
+                kalshi_fee_usd,
+                net_profit_usd,
                 result.kalshi_order_id or None,
                 result.poly_order_id or None,
                 result.status,
