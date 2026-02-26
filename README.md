@@ -74,12 +74,12 @@ Tiers are adjusted +2.5c above raw spread to account for cross-platform fund tra
 
 | Tier | Spread |
 |------|--------|
-| Ultra High | > 7.5c |
-| High | 4.5c – 7.5c |
-| Mid | 3.5c – 4.5c |
-| Low | 2.8c – 3.5c |
+| Ultra High | > 9.0c |
+| High | 6.0c – 9.0c |
+| Mid | 5.0c – 6.0c |
+| Low | 4.3c – 5.0c |
 
-Opportunities below 2.8c (`MIN_SPREAD_CENTS`) are ignored.
+Opportunities below 4.3c (`MIN_SPREAD_CENTS`) are ignored.
 
 ---
 
@@ -288,7 +288,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `SCAN_WINDOW_HOURS` | `72` | Only include markets closing within this window |
 | `RESOLUTION_TIME_TOLERANCE_HOURS` | `1` | Max close-time difference for a valid match |
 | `CRYPTO_MATCHING_ENABLED` | `False` | Enable/disable crypto market matching |
-| `MIN_SPREAD_CENTS` | `2.8` | Minimum spread to report an opportunity |
+| `MIN_SPREAD_CENTS` | `4.3` | Minimum spread to report an opportunity |
 | `EXEC_MAX_TRADE_USD` | `50.0` | Maximum combined spend per trade (both legs) |
 | `EXEC_POLY_MIN_ORDER_USD` | `1.0` | Minimum Polymarket order size per leg |
 | `EXEC_COOLDOWN_CYCLES` | `5` | Price cycles to wait between trades on same pair (~10s) |

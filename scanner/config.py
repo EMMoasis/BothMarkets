@@ -22,12 +22,12 @@ CRYPTO_MATCHING_ENABLED = False
 # --- Arbitrage thresholds ---
 # Tiers raised +0.5c vs raw spread to account for cash transfer fees between platforms
 PROFIT_TIERS = [
-    ("Ultra High", 7.5, float("inf")),
-    ("High",       4.5, 7.5),
-    ("Mid",        3.5, 4.5),
-    ("Low",        2.8, 3.5),
+    ("Ultra High", 9.0, float("inf")),
+    ("High",       6.0, 9.0),
+    ("Mid",        5.0, 6.0),
+    ("Low",        4.3, 5.0),
 ]
-MIN_SPREAD_CENTS = 2.8          # Ignore anything below this
+MIN_SPREAD_CENTS = 4.3          # Ignore anything below this
 MIN_PRICE_CENTS = 5.0           # Skip legs priced below this (near-zero tokens can't meet Poly $1 min)
 
 # --- Kalshi API ---
