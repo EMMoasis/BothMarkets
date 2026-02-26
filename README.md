@@ -242,7 +242,9 @@ The scanner loads `.env` automatically from the project root on startup.
 | `kalshi_filled` / `poly_filled` | Actual contracts/shares filled |
 | `kalshi_price_cents` / `poly_price_cents` | Prices at execution time |
 | `kalshi_cost_usd` / `poly_cost_usd` / `total_cost_usd` | USD spent per leg and combined |
-| `locked_profit_usd` | Guaranteed profit locked in (0 if not filled) |
+| `locked_profit_usd` | Guaranteed gross profit before fees (spread × units / 100) |
+| `kalshi_fee_usd` | Kalshi taker fee: 1.75% of face value (filled contracts × $1) |
+| `net_profit_usd` | Real profit after fees: `locked_profit_usd − kalshi_fee_usd` |
 | `kalshi_order_id` / `poly_order_id` | Platform order IDs |
 | `status` | `filled` / `skipped` / `unwound` / `partial_stuck` / `error` |
 | `reason` | Skip/fail reason code |
@@ -291,6 +293,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `EXEC_POLY_MIN_ORDER_USD` | `1.0` | Minimum Polymarket order size per leg |
 | `EXEC_COOLDOWN_CYCLES` | `5` | Price cycles to wait between trades on same pair (~10s) |
 | `EXEC_UNWIND_DELAY_SECONDS` | `2.0` | Delay before first Kalshi unwind attempt |
+| `KALSHI_TAKER_FEE_RATE` | `0.0175` | Kalshi taker fee rate (1.75% of face value per fill) |
 | `FETCH_WORKERS` | `20` | Parallel threads for CLOB price fetching |
 
 ---
