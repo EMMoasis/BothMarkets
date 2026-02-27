@@ -51,25 +51,34 @@ class OpportunityFinder:
             # --- Match validation (sports only) ---
             # Verify the match actually appears on Liquipedia's upcoming schedule.
             # Avoids arb losses on cancelled / never-scheduled events.
+            # Only CS2 is supported; other sports are allowed through silently at DEBUG.
             if MATCH_VALIDATION_ENABLED and km.market_type == MarketType.SPORTS:
-                verified = is_match_scheduled(km.team, km.opponent, km.sport)
-                if verified is False:
-                    if SKIP_UNVERIFIED_MATCHES:
-                        log.info(
-                            "SKIP | %s vs %s (%s) not found on Liquipedia — pair skipped",
-                            km.team, km.opponent, km.sport,
-                        )
-                        continue
-                    else:
-                        log.warning(
-                            "WARN | %s vs %s (%s) not found on Liquipedia — allowing (SKIP_UNVERIFIED_MATCHES=False)",
-                            km.team, km.opponent, km.sport,
-                        )
-                elif verified is None:
-                    log.warning(
-                        "WARN | Could not verify %s vs %s (%s) — Liquipedia unavailable, allowing",
+                sport_key = (km.sport or "").upper()
+                if sport_key != "CS2":
+                    # Validation not yet implemented for this sport — allow, no warning spam
+                    log.debug(
+                        "SKIP VALIDATION | %s vs %s — %s validation not yet implemented, allowing",
                         km.team, km.opponent, km.sport,
                     )
+                else:
+                    verified = is_match_scheduled(km.team, km.opponent, km.sport)
+                    if verified is False:
+                        if SKIP_UNVERIFIED_MATCHES:
+                            log.info(
+                                "SKIP | %s vs %s (%s) not found on Liquipedia — pair skipped",
+                                km.team, km.opponent, km.sport,
+                            )
+                            continue
+                        else:
+                            log.warning(
+                                "WARN | %s vs %s (%s) not found on Liquipedia — allowing (SKIP_UNVERIFIED_MATCHES=False)",
+                                km.team, km.opponent, km.sport,
+                            )
+                    elif verified is None:
+                        log.warning(
+                            "WARN | Could not verify %s vs %s (CS2) — Liquipedia unavailable, allowing",
+                            km.team, km.opponent,
+                        )
 
             # Strategy A: Buy Kalshi YES + Buy Polymarket NO
             # CRYPTO: Kalshi YES (above threshold) + Poly NO (below threshold)

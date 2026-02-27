@@ -32,7 +32,7 @@ from scanner.models import Opportunity
 log = logging.getLogger(__name__)
 
 # Default paper capital and split (can be overridden at construction time)
-PAPER_CAPITAL_USD: float = 10_000.0
+PAPER_CAPITAL_USD: float = 20_000.0   # $10K Kalshi + $10K Polymarket
 PAPER_KALSHI_RATIO: float = 0.5   # 50 % Kalshi, 50 % Polymarket
 
 
