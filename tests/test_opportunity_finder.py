@@ -114,28 +114,28 @@ class TestClassifyTier:
         assert _classify_tier(10.0) == "Ultra High"
 
     def test_ultra_high_boundary(self):
-        assert _classify_tier(9.0) == "Ultra High"
+        assert _classify_tier(8.0) == "Ultra High"   # boundary lowered from 9.0 → 8.0
 
     def test_high(self):
         assert _classify_tier(7.0) == "High"
 
     def test_high_lower_boundary(self):
-        assert _classify_tier(6.0) == "High"
+        assert _classify_tier(5.0) == "High"          # boundary lowered from 6.0 → 5.0
 
     def test_mid(self):
-        assert _classify_tier(5.5) == "Mid"
+        assert _classify_tier(4.5) == "Mid"            # boundary lowered from 5.0–6.0 → 4.0–5.0
 
     def test_mid_lower_boundary(self):
-        assert _classify_tier(5.0) == "Mid"
+        assert _classify_tier(4.0) == "Mid"            # boundary lowered from 5.0 → 4.0
 
     def test_low(self):
-        assert _classify_tier(4.5) == "Low"
+        assert _classify_tier(3.5) == "Low"            # boundary lowered from 4.3–5.0 → 3.3–4.0
 
     def test_low_lower_boundary(self):
-        assert _classify_tier(4.3) == "Low"
+        assert _classify_tier(3.3) == "Low"            # MIN_SPREAD_CENTS lowered from 4.3 → 3.3
 
     def test_below_threshold_returns_none(self):
-        assert _classify_tier(4.2) is None
+        assert _classify_tier(3.2) is None             # just below new 3.3 minimum
         assert _classify_tier(0.0) is None
         assert _classify_tier(2.8) is None
 
@@ -175,14 +175,14 @@ class TestEvaluateStrategy:
         assert opp is None
 
     def test_spread_below_min_skipped(self):
-        # 97c combined → 3.0c spread < 4.3c min
+        # 97c combined → 3.0c spread < 3.3c min
         pair = _make_crypto_pair()
         opp = _evaluate_strategy(pair, 57.0, 40.0, "YES", "NO")
         assert opp is None
 
     def test_hours_to_close_uses_earlier_time(self):
         pair = _make_crypto_pair(hours=48.0)
-        opp = _evaluate_strategy(pair, 50.0, 45.0, "YES", "NO")  # 50+45=95 → 5c spread ≥ 4.3c min
+        opp = _evaluate_strategy(pair, 50.0, 45.0, "YES", "NO")  # 50+45=95 → 5c spread ≥ 3.3c min
         assert opp is not None
         assert 47.0 <= opp.hours_to_close <= 48.0
 
@@ -200,7 +200,7 @@ class TestOpportunityFinder:
         self.finder = OpportunityFinder()
 
     def test_crypto_strategy_a_found(self):
-        # K-YES=51, P-NO=40 → 91c → spread 9c ≥ 4.3c min
+        # K-YES=51, P-NO=40 → 91c → spread 9c ≥ 3.3c min
         pair = _make_crypto_pair(k_yes_ask=51.0, p_no_ask=40.0)
         opps = self.finder.find_opportunities([pair])
         strat_a = [o for o in opps if o.kalshi_side == "YES" and o.poly_side == "NO"]
@@ -224,7 +224,7 @@ class TestOpportunityFinder:
         assert strat_a[0].spread_cents == 7.0
 
     def test_both_strategies_found(self):
-        # A: 51+40=91c (9c ≥ 4.3c min), B: 45+42=87c (13c) — both profitable
+        # A: 51+40=91c (9c ≥ 3.3c min), B: 45+42=87c (13c) — both profitable
         pair = _make_crypto_pair(k_yes_ask=51.0, k_no_ask=45.0, p_yes_ask=42.0, p_no_ask=40.0)
         opps = self.finder.find_opportunities([pair])
         assert len(opps) == 2
@@ -255,7 +255,7 @@ class TestOpportunityFinder:
 
 class TestFormatOpportunityLogCrypto:
     def test_contains_key_fields(self):
-        pair = _make_crypto_pair(k_yes_ask=51.0, p_no_ask=40.0)  # 91c → 9c spread ≥ 4.3c min
+        pair = _make_crypto_pair(k_yes_ask=51.0, p_no_ask=40.0)  # 91c → 9c spread ≥ 3.3c min
         opp = _evaluate_strategy(pair, 51.0, 40.0, "YES", "NO")
         assert opp is not None
         text = format_opportunity_log(opp)
@@ -269,7 +269,7 @@ class TestFormatOpportunityLogCrypto:
         assert "91.0c" in text
 
     def test_crypto_strategy_label(self):
-        pair = _make_crypto_pair(k_yes_ask=51.0, p_no_ask=40.0)  # 91c → 9c spread ≥ 4.3c min
+        pair = _make_crypto_pair(k_yes_ask=51.0, p_no_ask=40.0)  # 91c → 9c spread ≥ 3.3c min
         opp = _evaluate_strategy(pair, 51.0, 40.0, "YES", "NO")
         text = format_opportunity_log(opp)
         # Should say "Kalshi YES + Polymarket NO" for crypto

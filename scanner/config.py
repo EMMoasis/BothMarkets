@@ -20,14 +20,14 @@ RESOLUTION_TIME_TOLERANCE_HOURS = 1   # Max difference between Kalshi and Poly c
 CRYPTO_MATCHING_ENABLED = False
 
 # --- Arbitrage thresholds ---
-# Tiers raised +0.5c vs raw spread to account for cash transfer fees between platforms
+# Tiers account for cash transfer fees between platforms
 PROFIT_TIERS = [
-    ("Ultra High", 9.0, float("inf")),
-    ("High",       6.0, 9.0),
-    ("Mid",        5.0, 6.0),
-    ("Low",        4.3, 5.0),
+    ("Ultra High", 8.0, float("inf")),
+    ("High",       5.0, 8.0),
+    ("Mid",        4.0, 5.0),
+    ("Low",        3.3, 4.0),
 ]
-MIN_SPREAD_CENTS = 4.3          # Ignore anything below this
+MIN_SPREAD_CENTS = 3.3          # Ignore anything below this
 MIN_PRICE_CENTS = 5.0           # Skip legs priced below this (near-zero tokens can't meet Poly $1 min)
 
 # --- Kalshi API ---
