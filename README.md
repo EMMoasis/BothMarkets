@@ -38,6 +38,7 @@ Then one of those contracts always pays out 100c, locking in a 3c profit per sha
 | `scanner/poly_client.py` | Fetches Polymarket markets via Gamma API; polls CLOB prices per token |
 | `scanner/market_matcher.py` | Matches Kalshi and Polymarket markets by sport, team, opponent, date, subtype, and map number |
 | `scanner/opportunity_finder.py` | Detects arbitrage from matched pair prices; tiers opportunities by spread size |
+| `scanner/match_validator.py` | Verifies sports matches are actually scheduled on Liquipedia before allowing trades |
 | `scanner/arb_executor.py` | Executes two-leg trades; handles position sizing, cooldowns, and Kalshi unwind on Polymarket failure |
 | `scanner/kalshi_trader.py` | Kalshi order placement via RSA-PS256 signed REST API |
 | `scanner/poly_trader.py` | Polymarket order placement via `py-clob-client` (sig_type=2 proxy mode) |
@@ -80,6 +81,28 @@ Tiers are adjusted +2.5c above raw spread to account for cross-platform fund tra
 | Low | 4.3c – 5.0c |
 
 Opportunities below 4.3c (`MIN_SPREAD_CENTS`) are ignored.
+
+---
+
+## Match Validation
+
+Before placing any trade on a sports market, the scanner verifies the match is actually scheduled on **[Liquipedia](https://liquipedia.net/counterstrike/Matches)** (the authoritative CS2 match database).
+
+This prevents losses from markets that open speculatively for matches that are never confirmed or get cancelled before play.
+
+**How it works:**
+1. Before evaluating opportunities for a sports pair, `match_validator.py` checks Liquipedia's upcoming CS2 matches page
+2. Both team names are fuzzy-matched against the Liquipedia team list (substring + SequenceMatcher ratio ≥ 0.72)
+3. If either team is missing → the pair is **skipped entirely** (no opportunity logged, no trade)
+4. If Liquipedia is unavailable (timeout, etc.) → the pair is **allowed with a warning** (fail open)
+5. Results are cached for **30 minutes** — only one HTTP request per half-hour regardless of how many pairs are scanned
+
+| Config | Default | Description |
+|--------|---------|-------------|
+| `MATCH_VALIDATION_ENABLED` | `True` | Enable/disable the Liquipedia check |
+| `SKIP_UNVERIFIED_MATCHES` | `True` | Skip unverified pairs (`False` = warn only, still trade) |
+
+Currently only implemented for **CS2**. Other sports (`NBA`, `MLB`, etc.) pass through unvalidated.
 
 ---
 
@@ -265,7 +288,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 
 ## Test Coverage
 
-253 tests across 7 test files:
+275 tests across 8 test files:
 
 | File | Tests |
 |------|-------|
@@ -273,6 +296,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `tests/test_kalshi_client.py` | 75 |
 | `tests/test_kalshi_trader.py` | 23 |
 | `tests/test_market_matcher.py` | 37 |
+| `tests/test_match_validator.py` | 22 |
 | `tests/test_opportunity_finder.py` | 30 |
 | `tests/test_poly_client.py` | 46 |
 | `tests/test_poly_trader.py` | 13 |
@@ -294,6 +318,8 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `EXEC_COOLDOWN_CYCLES` | `5` | Price cycles to wait between trades on same pair (~10s) |
 | `EXEC_UNWIND_DELAY_SECONDS` | `2.0` | Delay before first Kalshi unwind attempt |
 | `KALSHI_TAKER_FEE_RATE` | `0.0175` | Kalshi taker fee rate (1.75% of face value per fill) |
+| `MATCH_VALIDATION_ENABLED` | `True` | Verify sports matches on Liquipedia before trading |
+| `SKIP_UNVERIFIED_MATCHES` | `True` | Skip pair if not found on Liquipedia (`False` = warn only) |
 | `FETCH_WORKERS` | `20` | Parallel threads for CLOB price fetching |
 
 ---

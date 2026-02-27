@@ -54,6 +54,12 @@ DB_FILE = "scanner.db"                # SQLite: opportunities + trades tables
 # Kalshi charges 1.75% of face value (contracts × $1) on taker fills.
 KALSHI_TAKER_FEE_RATE: float = 0.0175
 
+# --- Match validation ---
+# Before trading a sports market, verify the match appears on Liquipedia's
+# upcoming schedule.  Prevents arb losses from cancelled / never-scheduled events.
+MATCH_VALIDATION_ENABLED: bool = True
+SKIP_UNVERIFIED_MATCHES: bool = True    # True = skip pair | False = allow with warning only
+
 # --- Execution layer ---
 # Maximum total USD spend per trade (both legs combined).
 EXEC_MAX_TRADE_USD: float = 50.0
