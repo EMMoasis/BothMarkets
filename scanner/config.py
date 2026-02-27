@@ -54,6 +54,15 @@ DRY_RUN_DB_FILE = "scanner_paper.db"  # Separate DB used in --paper (dry-run) mo
 # --- Fees ---
 # Kalshi charges 1.75% of face value (contracts × $1) on taker fills.
 KALSHI_TAKER_FEE_RATE: float = 0.0175
+#
+# Polymarket fee structure (per docs.polymarket.com/trading/fees):
+#   - Esports (CS2, LOL, VALORANT, DOTA2, RL): 0% — fee-free
+#   - Standard sports (NBA, NFL, NHL, MLB):     0% — fee-free
+#   - NCAAB / Serie A (from Feb 18, 2026):      up to 0.44% at $0.50 price
+#   - 5/15-min crypto mini-markets:             up to 1.56% at $0.50 price
+# All markets currently scanned (esports + NBA/NFL/etc.) are fee-free on Polymarket.
+# No POLY_TAKER_FEE_RATE constant needed for current market scope.
+POLY_TAKER_FEE_RATE: float = 0.0   # effectively 0 for all esports and standard sports
 
 # --- Match validation ---
 # Before trading a sports market, verify the match appears on Liquipedia's
