@@ -49,6 +49,7 @@ LOG_FILE = "scanner.log"
 OPPS_LOG_FILE = "opportunities.log"   # Filtered: matched pairs + arb opportunities only
 OPPS_JSON_FILE = "opportunities.json" # NDJSON: one object per scan run
 DB_FILE = "scanner.db"                # SQLite: opportunities + trades tables
+DRY_RUN_DB_FILE = "scanner_paper.db"  # Separate DB used in --paper (dry-run) mode
 
 # --- Fees ---
 # Kalshi charges 1.75% of face value (contracts × $1) on taker fills.

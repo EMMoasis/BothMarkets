@@ -16,12 +16,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from scanner.config import (
     DB_FILE,
+    DRY_RUN_DB_FILE,
     ENV_KALSHI_API_KEY,
     ENV_KALSHI_API_SECRET,
     ENV_POLY_API_KEY,
@@ -224,12 +226,26 @@ def _update_pair_prices(
 # Main loop
 # ------------------------------------------------------------------
 
-def _init_executor():
+def _is_paper_mode() -> bool:
+    """Return True if the --paper flag was passed on the command line."""
+    return "--paper" in sys.argv
+
+
+def _init_executor(paper: bool = False):
     """
-    Try to initialize the arbitrage executor with credentials from env.
-    Returns ArbExecutor instance if all credentials are present, else None.
-    Trading remains disabled (scan-only) when any credential is missing.
+    Initialise the arbitrage executor.
+
+    paper=True  → returns PaperArbExecutor (no real orders, $10K virtual wallet)
+    paper=False → returns real ArbExecutor if credentials are present, else None
     """
+    if paper:
+        from scanner.paper_executor import PAPER_CAPITAL_USD, PaperArbExecutor
+        log.info("*" * 60)
+        log.info("  PAPER TRADING MODE — NO REAL ORDERS WILL BE PLACED")
+        log.info("  Virtual capital: $%.2f", PAPER_CAPITAL_USD)
+        log.info("*" * 60)
+        return PaperArbExecutor()
+
     from scanner.arb_executor import ArbExecutor
     from scanner.kalshi_trader import KalshiTrader
     from scanner.poly_trader import PolyTrader
@@ -274,8 +290,11 @@ def main() -> None:
     _load_env()
     _setup_logging()
 
+    paper = _is_paper_mode()
+    db_file = DRY_RUN_DB_FILE if paper else DB_FILE
+
     log.info("=" * 60)
-    log.info("BothMarkets scanner starting")
+    log.info("BothMarkets scanner starting%s", " [PAPER MODE]" if paper else "")
     log.info("Market refresh every %d minutes, price poll every %ds",
              MARKET_REFRESH_SECONDS // 60, PRICE_POLL_SECONDS)
 
@@ -283,8 +302,8 @@ def main() -> None:
     poly = PolyClient()
     matcher = MarketMatcher()
     finder = OpportunityFinder()
-    executor = _init_executor()  # None = scan-only mode
-    db = init_db(DB_FILE)
+    executor = _init_executor(paper=paper)
+    db = init_db(db_file)
 
     matched_pairs: list[MatchedPair] = []
     last_market_refresh: float = 0.0
@@ -292,105 +311,115 @@ def main() -> None:
     total_opportunities = 0
     total_trades = 0
 
-    while True:
-        now_mono = time.monotonic()
+    try:
+        while True:
+            now_mono = time.monotonic()
 
-        # --- Slow path: refresh market list every 2 hours ---
-        if now_mono - last_market_refresh >= MARKET_REFRESH_SECONDS:
-            log.info("=== MARKET REFRESH starting ===")
-            try:
-                kalshi_markets = kalshi.get_all_markets(force_refresh=True)
-                poly_markets = poly.get_all_markets(force_refresh=True)
-                matched_pairs = matcher.find_matches(kalshi_markets, poly_markets)
-                last_market_refresh = time.monotonic()
+            # --- Slow path: refresh market list every 2 hours ---
+            if now_mono - last_market_refresh >= MARKET_REFRESH_SECONDS:
+                log.info("=== MARKET REFRESH starting ===")
+                try:
+                    kalshi_markets = kalshi.get_all_markets(force_refresh=True)
+                    poly_markets = poly.get_all_markets(force_refresh=True)
+                    matched_pairs = matcher.find_matches(kalshi_markets, poly_markets)
+                    last_market_refresh = time.monotonic()
 
-                log.info(
-                    "=== MARKET REFRESH complete | K:%d P:%d markets | %d matched pairs ===",
-                    len(kalshi_markets), len(poly_markets), len(matched_pairs),
-                )
+                    log.info(
+                        "=== MARKET REFRESH complete | K:%d P:%d markets | %d matched pairs ===",
+                        len(kalshi_markets), len(poly_markets), len(matched_pairs),
+                    )
 
-                if not matched_pairs:
-                    log.info("No matched pairs found — verify parsing covers current market types")
+                    if not matched_pairs:
+                        log.info("No matched pairs found — verify parsing covers current market types")
 
-            except Exception:
-                log.exception("Market refresh failed")
-                # Back off 30 s before retrying (avoids hammering APIs on 429s)
-                last_market_refresh = time.monotonic() - MARKET_REFRESH_SECONDS + 30
+                except Exception:
+                    log.exception("Market refresh failed")
+                    # Back off 30 s before retrying (avoids hammering APIs on 429s)
+                    last_market_refresh = time.monotonic() - MARKET_REFRESH_SECONDS + 30
 
-        # --- Fast path: fetch live prices and check for arb every 2 seconds ---
-        if matched_pairs:
-            price_cycle += 1
-            if executor is not None:
-                executor.tick()
-            cycle_start = time.monotonic()
+            # --- Fast path: fetch live prices and check for arb every 2 seconds ---
+            if matched_pairs:
+                price_cycle += 1
+                if executor is not None:
+                    executor.tick()
+                cycle_start = time.monotonic()
 
-            try:
-                kalshi_prices, poly_prices = _fetch_all_prices(matched_pairs, kalshi, poly)
-                live_pairs = _update_pair_prices(matched_pairs, kalshi_prices, poly_prices)
+                try:
+                    kalshi_prices, poly_prices = _fetch_all_prices(matched_pairs, kalshi, poly)
+                    live_pairs = _update_pair_prices(matched_pairs, kalshi_prices, poly_prices)
 
-                opportunities = finder.find_opportunities(live_pairs)
-                total_opportunities += len(opportunities)
+                    opportunities = finder.find_opportunities(live_pairs)
+                    total_opportunities += len(opportunities)
 
-                # Log each pair with current prices (every cycle for test visibility)
-                for pair in live_pairs:
-                    finder.log_pair_prices(pair)
+                    # Log each pair with current prices (every cycle for test visibility)
+                    for pair in live_pairs:
+                        finder.log_pair_prices(pair)
 
-                # Log, execute, and persist opportunities
-                if opportunities:
-                    scan_ts = datetime.now(timezone.utc)
-                    for opp in opportunities:
-                        log.info("ARB OPPORTUNITY | %s", format_opportunity_log(opp))
+                    # Log, execute, and persist opportunities
+                    if opportunities:
+                        scan_ts = datetime.now(timezone.utc)
+                        for opp in opportunities:
+                            log.info("ARB OPPORTUNITY | %s", format_opportunity_log(opp))
 
-                        # Record every opportunity in the DB (executed flag updated below)
-                        opp_id = log_opportunity(db, opp, executed=False)
+                            # Record every opportunity in the DB (executed flag updated below)
+                            opp_id = log_opportunity(db, opp, executed=False)
 
-                        # Execute if trading is enabled and pair not on cooldown
-                        if executor is not None:
-                            if executor.is_on_cooldown(opp):
-                                log.info(
-                                    "EXEC SKIP (cooldown) | %s",
-                                    opp.pair.kalshi.platform_id,
-                                )
-                                continue
-                            try:
-                                result = executor.execute(opp)
-                                total_trades += 1
-                                log.info(
-                                    "EXEC RESULT #%d | status=%s reason=%s "
-                                    "units=%d cost=$%.4f profit=$%.4f | "
-                                    "K=%s P=%s",
-                                    total_trades, result.status, result.reason,
-                                    result.units, result.total_cost_usd,
-                                    result.guaranteed_profit_usd,
-                                    result.kalshi_order_id or "N/A",
-                                    result.poly_order_id or "N/A",
-                                )
-                                # Persist trade and mark opportunity as executed
-                                mark_opportunity_executed(db, opp_id)
-                                log_trade(db, opp_id, opp, result)
-                            except Exception:
-                                log.exception(
-                                    "Executor raised for %s",
-                                    opp.pair.kalshi.platform_id,
-                                )
+                            # Execute if trading is enabled and pair not on cooldown
+                            if executor is not None:
+                                if executor.is_on_cooldown(opp):
+                                    log.info(
+                                        "EXEC SKIP (cooldown) | %s",
+                                        opp.pair.kalshi.platform_id,
+                                    )
+                                    continue
+                                try:
+                                    result = executor.execute(opp)
+                                    total_trades += 1
+                                    log.info(
+                                        "EXEC RESULT #%d | status=%s reason=%s "
+                                        "units=%d cost=$%.4f profit=$%.4f | "
+                                        "K=%s P=%s",
+                                        total_trades, result.status, result.reason,
+                                        result.units, result.total_cost_usd,
+                                        result.guaranteed_profit_usd,
+                                        result.kalshi_order_id or "N/A",
+                                        result.poly_order_id or "N/A",
+                                    )
+                                    # Persist trade and mark opportunity as executed
+                                    mark_opportunity_executed(db, opp_id)
+                                    log_trade(db, opp_id, opp, result)
+                                except Exception:
+                                    log.exception(
+                                        "Executor raised for %s",
+                                        opp.pair.kalshi.platform_id,
+                                    )
 
-                    _save_opportunities_json(opportunities, scan_ts)
+                        _save_opportunities_json(opportunities, scan_ts)
 
-                elapsed = round(time.monotonic() - cycle_start, 3)
-                log.info(
-                    "SCAN CYCLE #%d | %.3fs | %d pairs | %d arb opportunities | "
-                    "%d lifetime | %d trades",
-                    price_cycle, elapsed, len(live_pairs), len(opportunities),
-                    total_opportunities, total_trades,
-                )
+                    elapsed = round(time.monotonic() - cycle_start, 3)
+                    log.info(
+                        "SCAN CYCLE #%d | %.3fs | %d pairs | %d arb opportunities | "
+                        "%d lifetime | %d trades",
+                        price_cycle, elapsed, len(live_pairs), len(opportunities),
+                        total_opportunities, total_trades,
+                    )
 
-            except Exception:
-                log.exception("Price cycle %d failed", price_cycle)
+                    # Paper mode: print wallet report every 100 cycles (~3 min)
+                    if paper and executor is not None and price_cycle % 100 == 0:
+                        log.info(executor.report())
 
-        # Sleep until next price poll
-        cycle_elapsed = time.monotonic() - now_mono
-        sleep_time = max(0.0, PRICE_POLL_SECONDS - cycle_elapsed)
-        time.sleep(sleep_time)
+                except Exception:
+                    log.exception("Price cycle %d failed", price_cycle)
+
+            # Sleep until next price poll
+            cycle_elapsed = time.monotonic() - now_mono
+            sleep_time = max(0.0, PRICE_POLL_SECONDS - cycle_elapsed)
+            time.sleep(sleep_time)
+
+    except KeyboardInterrupt:
+        log.info("Scanner stopped by user.")
+        if paper and executor is not None:
+            log.info(executor.report())
 
 
 if __name__ == "__main__":

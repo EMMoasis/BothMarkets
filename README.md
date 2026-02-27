@@ -106,6 +106,47 @@ Currently only implemented for **CS2**. Other sports (`NBA`, `MLB`, etc.) pass t
 
 ---
 
+## Paper Trading (Dry Run)
+
+Run the scanner in **paper mode** to simulate what would happen with $10K virtual capital — no real orders are placed.
+
+```bash
+py -m scanner.runner --paper
+```
+
+Or use the **"Paper Trade"** entry in the Claude launch panel.
+
+**What it does:**
+- Starts with a virtual wallet: **$5,000 Kalshi + $5,000 Polymarket**
+- Uses the exact same opportunity detection, market validation, and position sizing as live mode
+- Simulates instant full fills at the current ask price (no slippage)
+- Tracks Kalshi 1.75% fees on every simulated trade
+- Writes all simulated trades to **`scanner_paper.db`** (separate from the live `scanner.db`)
+- Prints a full wallet report every ~3 minutes and on exit (Ctrl+C)
+
+**Sample report:**
+```
+============================================================
+  PAPER TRADING REPORT
+============================================================
+  Initial capital   :  $10,000.00
+  Kalshi balance    :   $4,623.40
+  Poly balance      :   $4,234.12
+  Deployed          :   $1,142.48  (11.4% of capital)
+
+  Trades simulated  : 34
+  Gross profit      :      $62.34
+  Kalshi fees (est) :       $9.87
+  Net profit        :      $52.47
+  Net ROI on deployed:       4.59%
+
+  Best trade  : $6.72  — GLSIMP-2-IMP | 9.0c spread | 74 units
+  Worst trade : $0.21  — BHESHIN-1    | 5.0c spread | 4 units
+============================================================
+```
+
+---
+
 ## Setup
 
 ### Requirements
@@ -288,7 +329,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 
 ## Test Coverage
 
-275 tests across 8 test files:
+298 tests across 9 test files:
 
 | File | Tests |
 |------|-------|
@@ -298,6 +339,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `tests/test_market_matcher.py` | 37 |
 | `tests/test_match_validator.py` | 22 |
 | `tests/test_opportunity_finder.py` | 30 |
+| `tests/test_paper_executor.py` | 23 |
 | `tests/test_poly_client.py` | 46 |
 | `tests/test_poly_trader.py` | 13 |
 
