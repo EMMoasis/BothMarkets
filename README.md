@@ -71,53 +71,59 @@ BTC, ETH, SOL, XRP, DOGE price-level markets. Disabled via `CRYPTO_MATCHING_ENAB
 
 ## Opportunity Tiers
 
-Tiers are adjusted +2.5c above raw spread to account for cross-platform fund transfer fees and ensure only high-quality trades are executed:
-
 | Tier | Spread |
 |------|--------|
-| Ultra High | > 9.0c |
-| High | 6.0c – 9.0c |
-| Mid | 5.0c – 6.0c |
-| Low | 4.3c – 5.0c |
+| Ultra High | ≥ 8.0c |
+| High | 5.0c – 8.0c |
+| Mid | 4.0c – 5.0c |
+| Low | 3.3c – 4.0c |
 
-Opportunities below 4.3c (`MIN_SPREAD_CENTS`) are ignored.
+Opportunities below 3.3c (`MIN_SPREAD_CENTS`) are ignored.
 
 ---
 
 ## Match Validation
 
-Before placing any trade on a sports market, the scanner verifies the match is actually scheduled on **[Liquipedia](https://liquipedia.net/counterstrike/Matches)** (the authoritative CS2 match database).
+Before placing any trade on a sports market, the scanner verifies the match is actually scheduled on **[Liquipedia](https://liquipedia.net)** — the authoritative esports match database.
 
-This prevents losses from markets that open speculatively for matches that are never confirmed or get cancelled before play.
+This prevents losses from markets that open speculatively for matches that are never confirmed or get cancelled before play (e.g. the real-world BHE vs ShindeN loss that prompted this feature).
 
 **How it works:**
-1. Before evaluating opportunities for a sports pair, `match_validator.py` checks Liquipedia's upcoming CS2 matches page
-2. Both team names are fuzzy-matched against the Liquipedia team list (substring + SequenceMatcher ratio ≥ 0.72)
+1. Before evaluating opportunities for a sports pair, `match_validator.py` fetches Liquipedia's upcoming matches page for that sport
+2. Both team names are fuzzy-matched against the Liquipedia team list (substring match + SequenceMatcher ratio ≥ 0.72)
 3. If either team is missing → the pair is **skipped entirely** (no opportunity logged, no trade)
 4. If Liquipedia is unavailable (timeout, etc.) → the pair is **allowed with a warning** (fail open)
-5. Results are cached for **30 minutes** — only one HTTP request per half-hour regardless of how many pairs are scanned
+5. Results are cached **per sport** for **30 minutes** — only one HTTP request per sport per half-hour
+
+**Supported sports (validated against Liquipedia):**
+
+| Sport | Liquipedia URL |
+|-------|---------------|
+| CS2 | liquipedia.net/counterstrike/Matches |
+| LOL | liquipedia.net/leagueoflegends/Matches |
+| VALORANT | liquipedia.net/valorant/Matches |
+| DOTA2 | liquipedia.net/dota2/Matches |
+| RL | liquipedia.net/rocketleague/Matches |
+
+Traditional sports (NBA, NFL, NHL, MLB, Soccer) pass through without validation — no equivalent Liquipedia match page.
 
 | Config | Default | Description |
 |--------|---------|-------------|
 | `MATCH_VALIDATION_ENABLED` | `True` | Enable/disable the Liquipedia check |
 | `SKIP_UNVERIFIED_MATCHES` | `True` | Skip unverified pairs (`False` = warn only, still trade) |
 
-Currently only implemented for **CS2**. Other sports (`NBA`, `MLB`, etc.) pass through unvalidated.
-
 ---
 
 ## Paper Trading (Dry Run)
 
-Run the scanner in **paper mode** to simulate what would happen with $10K virtual capital — no real orders are placed.
+Run the scanner in **paper mode** to simulate what would happen with $20K virtual capital — no real orders are placed.
 
 ```bash
 py -m scanner.runner --paper
 ```
 
-Or use the **"Paper Trade"** entry in the Claude launch panel.
-
 **What it does:**
-- Starts with a virtual wallet: **$5,000 Kalshi + $5,000 Polymarket**
+- Starts with a virtual wallet: **$10,000 Kalshi + $10,000 Polymarket**
 - Uses the exact same opportunity detection, market validation, and position sizing as live mode
 - Simulates instant full fills at the current ask price (no slippage)
 - Tracks Kalshi 1.75% fees on every simulated trade
@@ -323,13 +329,14 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | Name | Command |
 |------|---------|
 | `Scanner` | `py -m scanner.runner` |
+| `Paper Trade` | `py -m scanner.runner --paper` |
 | `Tests` | `py -m pytest tests/ -v` |
 
 ---
 
 ## Test Coverage
 
-298 tests across 9 test files:
+321 tests across 9 test files:
 
 | File | Tests |
 |------|-------|
@@ -337,7 +344,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `tests/test_kalshi_client.py` | 75 |
 | `tests/test_kalshi_trader.py` | 23 |
 | `tests/test_market_matcher.py` | 37 |
-| `tests/test_match_validator.py` | 22 |
+| `tests/test_match_validator.py` | 45 |
 | `tests/test_opportunity_finder.py` | 30 |
 | `tests/test_paper_executor.py` | 23 |
 | `tests/test_poly_client.py` | 46 |
@@ -354,7 +361,7 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `SCAN_WINDOW_HOURS` | `72` | Only include markets closing within this window |
 | `RESOLUTION_TIME_TOLERANCE_HOURS` | `1` | Max close-time difference for a valid match |
 | `CRYPTO_MATCHING_ENABLED` | `False` | Enable/disable crypto market matching |
-| `MIN_SPREAD_CENTS` | `4.3` | Minimum spread to report an opportunity |
+| `MIN_SPREAD_CENTS` | `3.3` | Minimum spread to report an opportunity |
 | `EXEC_MAX_TRADE_USD` | `50.0` | Maximum combined spend per trade (both legs) |
 | `EXEC_POLY_MIN_ORDER_USD` | `1.0` | Minimum Polymarket order size per leg |
 | `EXEC_COOLDOWN_CYCLES` | `5` | Price cycles to wait between trades on same pair (~10s) |
@@ -371,8 +378,8 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | Platform | Endpoint |
 |----------|---------|
 | Kalshi market list | `GET https://api.elections.kalshi.com/trade-api/v2/markets?status=open&limit=1000` |
-| Kalshi market price | `GET https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}` |
-| Kalshi orderbook | `GET https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook` |
+| Kalshi market price | `GET https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}` — `yes_ask`/`no_ask` may be null; orderbook is used as fallback |
+| Kalshi orderbook | `GET https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook` — authoritative price source + depth |
 | Kalshi order placement | `POST https://api.elections.kalshi.com/trade-api/v2/portfolio/orders` |
 | Polymarket market list | `GET https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=500` |
 | Polymarket CLOB prices | `GET https://clob.polymarket.com/book?token_id={token_id}` |
