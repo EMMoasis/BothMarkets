@@ -182,7 +182,7 @@ class KalshiClient:
 
         def fetch_one(ticker: str) -> tuple[str, dict[str, float | None]]:
             try:
-                # Fetch price + depth in parallel sub-requests
+                # Fetch market prices
                 price_resp = self._http.get(f"{KALSHI_BASE_URL}/markets/{ticker}")
                 price_resp.raise_for_status()
                 mkt = price_resp.json().get("market", {})
@@ -192,10 +192,24 @@ class KalshiClient:
                 yes_bid = _to_cents(mkt.get("yes_bid"))
                 no_bid  = _to_cents(mkt.get("no_bid"))
 
-                # Fetch orderbook depth
-                yes_ask_depth, no_ask_depth = _fetch_kalshi_depth(
-                    self._http, ticker, yes_ask, no_ask
-                )
+                # Fetch orderbook (for depth + price fallback)
+                # Kalshi's /markets/{ticker} sometimes omits yes_ask/no_ask even
+                # when active orders exist — the orderbook is the authoritative source.
+                ob_resp = self._http.get(f"{KALSHI_BASE_URL}/markets/{ticker}/orderbook")
+                ob_resp.raise_for_status()
+                book = ob_resp.json().get("orderbook") or {}
+
+                yes_levels = book.get("yes") or []
+                no_levels  = book.get("no")  or []
+
+                # Fallback: extract best ask from orderbook when market endpoint is null
+                if yes_ask is None and yes_levels:
+                    yes_ask = _to_cents(yes_levels[0][0])
+                if no_ask is None and no_levels:
+                    no_ask = _to_cents(no_levels[0][0])
+
+                yes_ask_depth = _kalshi_depth_at_best_ask(yes_levels, yes_ask)
+                no_ask_depth  = _kalshi_depth_at_best_ask(no_levels,  no_ask)
 
                 return ticker, {
                     "yes_ask": yes_ask,

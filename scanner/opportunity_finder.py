@@ -119,9 +119,16 @@ class OpportunityFinder:
         """
         Log a matched pair with current prices, depth, and strategy evaluation.
         Called every price poll cycle for all matched pairs (even without arb).
+        Pairs where Kalshi has no prices at all are logged at DEBUG to reduce noise.
         """
         km = pair.kalshi
         pm = pair.poly
+
+        # If Kalshi has no prices on either side, there's nothing actionable —
+        # log at DEBUG only to avoid flooding the log with N/A spam.
+        if km.yes_ask_cents is None and km.no_ask_cents is None:
+            log.debug("PAIR (no Kalshi prices) | %s | skipping verbose log", km.platform_id)
+            return
 
         def _fmt_k(cents, depth) -> str:
             """Format Kalshi price with orderbook contract depth."""
