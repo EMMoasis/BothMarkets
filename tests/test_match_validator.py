@@ -1,10 +1,11 @@
 """Tests for match_validator — Liquipedia schedule verification."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from scanner.match_validator import (
+    SUPPORTED_SPORTS,
     _fuzzy_find,
     clear_cache,
     is_match_scheduled,
@@ -30,7 +31,9 @@ _SAMPLE_TEAMS = frozenset([
 
 
 def _patch_fetch(teams):
-    """Context manager: patch _fetch_liquipedia_teams to return *teams*."""
+    """Context manager: patch _fetch_liquipedia_teams to return *teams*.
+    The mock ignores the URL argument and always returns the given set.
+    """
     return patch(
         "scanner.match_validator._fetch_liquipedia_teams",
         return_value=teams,
@@ -58,8 +61,7 @@ class TestFuzzyFind:
         assert _fuzzy_find("Bounty Hunters", _SAMPLE_TEAMS) is True
 
     def test_fuzzy_close_name(self):
-        # "Navi" → close enough to "Natus Vincere"? Probably not, threshold 0.72
-        # But "Natus Vincere" → "Natus Vincere" is exact
+        # Exact match case
         assert _fuzzy_find("Natus Vincere", _SAMPLE_TEAMS) is True
 
     def test_not_found(self):
@@ -75,6 +77,36 @@ class TestFuzzyFind:
 
 
 # ---------------------------------------------------------------------------
+# SUPPORTED_SPORTS export
+# ---------------------------------------------------------------------------
+
+class TestSupportedSports:
+    def test_cs2_supported(self):
+        assert "CS2" in SUPPORTED_SPORTS
+
+    def test_lol_supported(self):
+        assert "LOL" in SUPPORTED_SPORTS
+
+    def test_valorant_supported(self):
+        assert "VALORANT" in SUPPORTED_SPORTS
+
+    def test_dota2_supported(self):
+        assert "DOTA2" in SUPPORTED_SPORTS
+
+    def test_rl_supported(self):
+        assert "RL" in SUPPORTED_SPORTS
+
+    def test_nba_not_supported(self):
+        assert "NBA" not in SUPPORTED_SPORTS
+
+    def test_nfl_not_supported(self):
+        assert "NFL" not in SUPPORTED_SPORTS
+
+    def test_soccer_not_supported(self):
+        assert "SOCCER" not in SUPPORTED_SPORTS
+
+
+# ---------------------------------------------------------------------------
 # is_match_scheduled
 # ---------------------------------------------------------------------------
 
@@ -82,8 +114,19 @@ class TestIsMatchScheduled:
     def setup_method(self):
         clear_cache()
 
-    def test_non_cs2_sport_returns_none(self):
+    # --- Unsupported / traditional sports return None immediately ---
+
+    def test_nba_returns_none(self):
+        """Traditional sports with no Liquipedia page return None (allow through)."""
         result = is_match_scheduled("Lakers", "Celtics", "NBA")
+        assert result is None
+
+    def test_nfl_returns_none(self):
+        result = is_match_scheduled("Chiefs", "Eagles", "NFL")
+        assert result is None
+
+    def test_soccer_returns_none(self):
+        result = is_match_scheduled("Manchester City", "Arsenal", "SOCCER")
         assert result is None
 
     def test_empty_team_returns_none(self):
@@ -94,35 +137,90 @@ class TestIsMatchScheduled:
         result = is_match_scheduled("FURIA", "", "CS2")
         assert result is None
 
-    def test_both_teams_found_returns_true(self):
+    # --- CS2 validation ---
+
+    def test_cs2_both_teams_found_returns_true(self):
         with _patch_fetch(_SAMPLE_TEAMS):
             result = is_match_scheduled("FURIA", "Cloud9", "CS2")
         assert result is True
 
-    def test_one_team_missing_returns_false(self):
+    def test_cs2_one_team_missing_returns_false(self):
         with _patch_fetch(_SAMPLE_TEAMS):
             result = is_match_scheduled("FURIA", "Ghost Gaming", "CS2")
         assert result is False
 
-    def test_both_teams_missing_returns_false(self):
+    def test_cs2_both_teams_missing_returns_false(self):
         with _patch_fetch(_SAMPLE_TEAMS):
             result = is_match_scheduled("Ghost Gaming", "Unknown Squad", "CS2")
         assert result is False
 
-    def test_liquipedia_unavailable_returns_none(self):
+    def test_cs2_liquipedia_unavailable_returns_none(self):
         with _patch_fetch(None):
             result = is_match_scheduled("FURIA", "Cloud9", "CS2")
         assert result is None
 
-    def test_bheshin_match_not_found(self):
-        """The exact pair that caused the real-world loss should return False."""
+    def test_cs2_case_insensitive_team_names(self):
         with _patch_fetch(_SAMPLE_TEAMS):
-            # ShindeN IS in our sample set, but Bounty Hunters Esports also is
-            # Both found → True in sample. Test with a set missing one.
-            teams_without_shinden = frozenset(t for t in _SAMPLE_TEAMS if t != "ShindeN")
-        with _patch_fetch(teams_without_shinden):
-            result = is_match_scheduled("Bounty Hunters Esports", "ShindeN", "CS2")
+            result = is_match_scheduled("furia", "cloud9", "CS2")
+        assert result is True
+
+    # --- LOL validation (same logic, different Liquipedia URL) ---
+
+    def test_lol_both_teams_found_returns_true(self):
+        lol_teams = frozenset(["T1", "Gen.G", "Team Liquid", "Lyon Esports"])
+        with _patch_fetch(lol_teams):
+            result = is_match_scheduled("T1", "Gen.G", "LOL")
+        assert result is True
+
+    def test_lol_team_not_found_returns_false(self):
+        lol_teams = frozenset(["T1", "Gen.G"])
+        with _patch_fetch(lol_teams):
+            result = is_match_scheduled("T1", "UnknownTeam", "LOL")
         assert result is False
+
+    def test_lol_liquipedia_unavailable_returns_none(self):
+        with _patch_fetch(None):
+            result = is_match_scheduled("T1", "Gen.G", "LOL")
+        assert result is None
+
+    def test_lol_lyon_vs_liquid_found(self):
+        """Real-world pair that was previously getting false 'unavailable' warnings."""
+        lol_teams = frozenset(["Lyon Esports", "Team Liquid"])
+        with _patch_fetch(lol_teams):
+            result = is_match_scheduled("lyon", "liquid", "LOL")
+        assert result is True
+
+    # --- VALORANT validation ---
+
+    def test_valorant_both_teams_found_returns_true(self):
+        val_teams = frozenset(["Novo Esports", "Falke Esports", "Sentinels"])
+        with _patch_fetch(val_teams):
+            result = is_match_scheduled("Novo Esports", "Falke Esports", "VALORANT")
+        assert result is True
+
+    def test_valorant_team_not_found_returns_false(self):
+        val_teams = frozenset(["Sentinels", "NRG"])
+        with _patch_fetch(val_teams):
+            result = is_match_scheduled("Novo Esports", "Falke Esports", "VALORANT")
+        assert result is False
+
+    # --- DOTA2 validation ---
+
+    def test_dota2_both_teams_found_returns_true(self):
+        dota_teams = frozenset(["Team Spirit", "OG", "Tundra Esports"])
+        with _patch_fetch(dota_teams):
+            result = is_match_scheduled("Team Spirit", "OG", "DOTA2")
+        assert result is True
+
+    # --- Rocket League validation ---
+
+    def test_rl_both_teams_found_returns_true(self):
+        rl_teams = frozenset(["Team Falcons", "G2 Esports", "Vitality"])
+        with _patch_fetch(rl_teams):
+            result = is_match_scheduled("Team Falcons", "G2 Esports", "RL")
+        assert result is True
+
+    # --- Cache behaviour (sport-keyed) ---
 
     def test_result_cached_per_pair(self):
         """Second call for the same pair should not re-fetch Liquipedia."""
@@ -132,18 +230,28 @@ class TestIsMatchScheduled:
         # fetch should only be called once (cache hit on second)
         assert mock_fetch.call_count == 1
 
-    def test_cache_is_cleared_by_clear_cache(self):
+    def test_different_sports_fetch_separately(self):
+        """CS2 and LOL caches are keyed independently — both need a fetch."""
         with _patch_fetch(_SAMPLE_TEAMS) as mock_fetch:
+            is_match_scheduled("FURIA", "Cloud9", "CS2")
+            is_match_scheduled("T1", "Gen.G", "LOL")
+        # Two different sport keys → two separate fetches
+        assert mock_fetch.call_count == 2
+
+    def test_cache_is_cleared_by_clear_cache(self):
+        with _patch_fetch(_SAMPLE_TEAMS):
             is_match_scheduled("FURIA", "Cloud9", "CS2")
         clear_cache()
         with _patch_fetch(_SAMPLE_TEAMS) as mock_fetch2:
             is_match_scheduled("FURIA", "Cloud9", "CS2")
         assert mock_fetch2.call_count == 1
 
-    def test_case_insensitive_team_names(self):
-        with _patch_fetch(_SAMPLE_TEAMS):
-            result = is_match_scheduled("furia", "cloud9", "CS2")
-        assert result is True
+    def test_bheshin_match_not_found(self):
+        """The exact pair that caused the real-world loss should return False."""
+        teams_without_shinden = frozenset(t for t in _SAMPLE_TEAMS if t != "ShindeN")
+        with _patch_fetch(teams_without_shinden):
+            result = is_match_scheduled("Bounty Hunters Esports", "ShindeN", "CS2")
+        assert result is False
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +264,7 @@ class TestOpportunityFinderIntegration:
     def setup_method(self):
         clear_cache()
 
-    def _make_sports_pair(self):
+    def _make_sports_pair(self, sport: str = "CS2", team: str = "FURIA", opponent: str = "Cloud9"):
         from datetime import datetime, timedelta, timezone
         from scanner.models import MarketType, MatchedPair, NormalizedMarket, Platform
 
@@ -165,12 +273,12 @@ class TestOpportunityFinderIntegration:
 
         kalshi = NormalizedMarket(
             platform=Platform.KALSHI,
-            platform_id="KXCS2-TEST",
-            platform_url="https://kalshi.com/markets/KXCS2-TEST",
-            raw_question="Test: FURIA vs Cloud9 Map 1",
+            platform_id=f"KX{sport}-TEST",
+            platform_url=f"https://kalshi.com/markets/KX{sport}-TEST",
+            raw_question=f"Test: {team} vs {opponent} Map 1",
             market_type=MarketType.SPORTS,
-            asset="CS2", direction="WIN",
-            team="FURIA", opponent="Cloud9", sport="CS2",
+            asset=sport, direction="WIN",
+            team=team, opponent=opponent, sport=sport,
             resolution_dt=close,
             yes_ask_cents=51.0, no_ask_cents=52.0,
             yes_ask_depth=100, no_ask_depth=100,
@@ -179,37 +287,71 @@ class TestOpportunityFinderIntegration:
             platform=Platform.POLYMARKET,
             platform_id="poly-test-123",
             platform_url="https://polymarket.com/event/test",
-            raw_question="FURIA vs Cloud9",
+            raw_question=f"{team} vs {opponent}",
             market_type=MarketType.SPORTS,
-            asset="CS2", direction="WIN",
-            team="FURIA", opponent="Cloud9", sport="CS2",
+            asset=sport, direction="WIN",
+            team=team, opponent=opponent, sport=sport,
             resolution_dt=close,
             yes_ask_cents=40.0, no_ask_cents=40.0,
             yes_ask_depth=100, no_ask_depth=100,
         )
         return MatchedPair(kalshi=kalshi, poly=poly)
 
-    def test_verified_match_yields_opportunities(self):
+    def test_cs2_verified_match_yields_opportunities(self):
         from scanner.opportunity_finder import OpportunityFinder
-        pair = self._make_sports_pair()
+        pair = self._make_sports_pair(sport="CS2")
         with _patch_fetch(_SAMPLE_TEAMS):
             opps = OpportunityFinder().find_opportunities([pair])
         assert len(opps) > 0
 
-    def test_unverified_match_skipped(self):
+    def test_cs2_unverified_match_skipped(self):
         from scanner.opportunity_finder import OpportunityFinder
-        pair = self._make_sports_pair()
-        # Patch so FURIA is not on Liquipedia
+        pair = self._make_sports_pair(sport="CS2")
         unknown_teams = frozenset(["Some Other Team"])
         with _patch_fetch(unknown_teams):
             opps = OpportunityFinder().find_opportunities([pair])
         assert len(opps) == 0
 
-    def test_liquipedia_unavailable_still_yields(self):
+    def test_cs2_liquipedia_unavailable_still_yields(self):
         """If Liquipedia is down, allow trade (None result)."""
         from scanner.opportunity_finder import OpportunityFinder
-        pair = self._make_sports_pair()
+        pair = self._make_sports_pair(sport="CS2")
         with _patch_fetch(None):
             opps = OpportunityFinder().find_opportunities([pair])
-        # Should still find opportunities (allow with warning)
+        assert len(opps) > 0
+
+    def test_lol_verified_match_yields_opportunities(self):
+        """LOL pairs are now validated — verified match should produce opportunities."""
+        from scanner.opportunity_finder import OpportunityFinder
+        lol_teams = frozenset(["Lyon Esports", "Team Liquid"])
+        pair = self._make_sports_pair(sport="LOL", team="lyon", opponent="liquid")
+        with _patch_fetch(lol_teams):
+            opps = OpportunityFinder().find_opportunities([pair])
+        assert len(opps) > 0
+
+    def test_lol_unverified_match_skipped(self):
+        """LOL pairs not found on Liquipedia should be skipped."""
+        from scanner.opportunity_finder import OpportunityFinder
+        pair = self._make_sports_pair(sport="LOL", team="UnknownLOL", opponent="NoTeam")
+        with _patch_fetch(frozenset(["T1", "Gen.G"])):
+            opps = OpportunityFinder().find_opportunities([pair])
+        assert len(opps) == 0
+
+    def test_valorant_verified_match_yields_opportunities(self):
+        """VALORANT pairs are now validated."""
+        from scanner.opportunity_finder import OpportunityFinder
+        val_teams = frozenset(["Novo Esports", "Falke Esports"])
+        pair = self._make_sports_pair(sport="VALORANT", team="Novo Esports", opponent="Falke Esports")
+        with _patch_fetch(val_teams):
+            opps = OpportunityFinder().find_opportunities([pair])
+        assert len(opps) > 0
+
+    def test_nba_passes_through_without_validation(self):
+        """NBA has no Liquipedia page — pairs pass through silently (no fetch needed)."""
+        from scanner.opportunity_finder import OpportunityFinder
+        pair = self._make_sports_pair(sport="NBA", team="Lakers", opponent="Celtics")
+        with _patch_fetch(_SAMPLE_TEAMS) as mock_fetch:
+            opps = OpportunityFinder().find_opportunities([pair])
+        # NBA bypasses validation entirely — Liquipedia should never be called
+        assert mock_fetch.call_count == 0
         assert len(opps) > 0

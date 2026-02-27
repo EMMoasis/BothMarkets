@@ -23,7 +23,7 @@ from scanner.config import (
     PROFIT_TIERS,
     SKIP_UNVERIFIED_MATCHES,
 )
-from scanner.match_validator import is_match_scheduled
+from scanner.match_validator import SUPPORTED_SPORTS, is_match_scheduled
 from scanner.models import MarketType, MatchedPair, NormalizedMarket, Opportunity
 
 log = logging.getLogger(__name__)
@@ -51,13 +51,14 @@ class OpportunityFinder:
             # --- Match validation (sports only) ---
             # Verify the match actually appears on Liquipedia's upcoming schedule.
             # Avoids arb losses on cancelled / never-scheduled events.
-            # Only CS2 is supported; other sports are allowed through silently at DEBUG.
+            # Supported esports: CS2, LOL, VALORANT, DOTA2, RL.
+            # Traditional sports (NBA/NFL/etc.) pass through silently at DEBUG.
             if MATCH_VALIDATION_ENABLED and km.market_type == MarketType.SPORTS:
                 sport_key = (km.sport or "").upper()
-                if sport_key != "CS2":
-                    # Validation not yet implemented for this sport — allow, no warning spam
+                if sport_key not in SUPPORTED_SPORTS:
+                    # No Liquipedia validation for this sport — allow, no warning spam
                     log.debug(
-                        "SKIP VALIDATION | %s vs %s — %s validation not yet implemented, allowing",
+                        "SKIP VALIDATION | %s vs %s — %s validation not supported, allowing",
                         km.team, km.opponent, km.sport,
                     )
                 else:
@@ -76,8 +77,8 @@ class OpportunityFinder:
                             )
                     elif verified is None:
                         log.warning(
-                            "WARN | Could not verify %s vs %s (CS2) — Liquipedia unavailable, allowing",
-                            km.team, km.opponent,
+                            "WARN | Could not verify %s vs %s (%s) — Liquipedia unavailable, allowing",
+                            km.team, km.opponent, km.sport,
                         )
 
             # Strategy A: Buy Kalshi YES + Buy Polymarket NO
