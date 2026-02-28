@@ -65,6 +65,8 @@ class ExecutionResult:
     # On unwind: how much was recovered from selling Kalshi leg back
     unwind_recovered_usd: float = 0.0
 
+    poly_balance_before: float | None = None  # Poly USDC balance at time of check
+
 
 class ArbExecutor:
     """
@@ -139,7 +141,8 @@ class ArbExecutor:
                 "EXEC SKIP | Poly wallet balance $%.2f < min $%.2f — deposit USDC to wallet",
                 poly_bal, EXEC_POLY_MIN_ORDER_USD,
             )
-            return ExecutionResult(status="skipped", reason="poly_insufficient_balance")
+            return ExecutionResult(status="skipped", reason="poly_insufficient_balance",
+                                   poly_balance_before=poly_bal)
 
         # Position sizing — may walk the book and return a blended poly price
         units, effective_p_price = _calc_units(
@@ -157,7 +160,8 @@ class ArbExecutor:
                 f"{k_depth:.0f}" if k_depth else "?",
                 f"{p_depth:.0f}" if p_depth else "?",
             )
-            return ExecutionResult(status="skipped", reason="insufficient_units")
+            return ExecutionResult(status="skipped", reason="insufficient_units",
+                                   poly_balance_before=poly_bal)
 
         log.info(
             "EXEC | %s | Strategy %s | K-%s @ %dc  P-%s @ %dc | %d units | spread=%.2fc",
@@ -240,6 +244,7 @@ class ArbExecutor:
                 kalshi_order_id=k_order_id,
                 kalshi_cost_usd=round(units * k_price_int / 100.0, 4),
                 unwind_recovered_usd=round(unwind_result.get("recovered_usd", 0.0), 4),
+                poly_balance_before=poly_bal,
             )
 
         # Both legs filled
@@ -264,6 +269,7 @@ class ArbExecutor:
             total_cost_usd=total_cost,
             spread_cents=opp.spread_cents,
             guaranteed_profit_usd=guaranteed_profit,
+            poly_balance_before=poly_bal,
         )
 
     # ------------------------------------------------------------------
