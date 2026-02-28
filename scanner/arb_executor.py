@@ -65,7 +65,10 @@ class ExecutionResult:
     # On unwind: how much was recovered from selling Kalshi leg back
     unwind_recovered_usd: float = 0.0
 
-    poly_balance_before: float | None = None  # Poly USDC balance at time of check
+    kalshi_balance_before: float | None = None  # Kalshi cash balance before trade
+    poly_balance_before: float | None = None    # Poly USDC balance before trade
+    kalshi_balance_after: float | None = None   # Kalshi cash balance after trade
+    poly_balance_after: float | None = None     # Poly USDC balance after trade
 
 
 class ArbExecutor:
@@ -129,12 +132,21 @@ class ArbExecutor:
         if not poly_token_id:
             return ExecutionResult(status="error", reason="missing_poly_token_id")
 
-        # Guard: Polymarket wallet must have enough USDC to cover at least one leg
+        # Fetch both balances before trade for guard check and reconciliation
         try:
             poly_bal = self._poly.get_usdc_balance()
         except Exception as exc:
             log.warning("EXEC | Could not fetch Poly balance: %s — skipping", exc)
             return ExecutionResult(status="skipped", reason="poly_balance_check_failed")
+
+        try:
+            k_bal = self._kalshi.get_balance()
+        except Exception as exc:
+            log.warning("EXEC | Could not fetch Kalshi balance: %s — continuing", exc)
+            k_bal = None
+
+        log.info("EXEC | Balances before: Kalshi=$%.2f  Poly=$%.2f",
+                 k_bal if k_bal is not None else -1, poly_bal)
 
         if poly_bal < EXEC_POLY_MIN_ORDER_USD:
             log.warning(
@@ -142,6 +154,7 @@ class ArbExecutor:
                 poly_bal, EXEC_POLY_MIN_ORDER_USD,
             )
             return ExecutionResult(status="skipped", reason="poly_insufficient_balance",
+                                   kalshi_balance_before=k_bal,
                                    poly_balance_before=poly_bal)
 
         # Position sizing — may walk the book and return a blended poly price
@@ -161,6 +174,7 @@ class ArbExecutor:
                 f"{p_depth:.0f}" if p_depth else "?",
             )
             return ExecutionResult(status="skipped", reason="insufficient_units",
+                                   kalshi_balance_before=k_bal,
                                    poly_balance_before=poly_bal)
 
         log.info(
@@ -237,6 +251,13 @@ class ArbExecutor:
                 bought_price_cents=k_price_int,
             )
             self._set_cooldown(opp, EXEC_COOLDOWN_CYCLES * 2)
+            k_bal_after, poly_bal_after = self._reconcile_balances(
+                label=km.platform_id,
+                k_bal_before=k_bal,
+                poly_bal_before=poly_bal,
+                expected_k_delta=-round(units * k_price_int / 100.0, 4),
+                expected_p_delta=0.0,  # Poly leg never placed
+            )
             return ExecutionResult(
                 status="unwound" if unwind_result["ok"] else "partial_stuck",
                 reason="poly_leg_failed",
@@ -244,7 +265,10 @@ class ArbExecutor:
                 kalshi_order_id=k_order_id,
                 kalshi_cost_usd=round(units * k_price_int / 100.0, 4),
                 unwind_recovered_usd=round(unwind_result.get("recovered_usd", 0.0), 4),
+                kalshi_balance_before=k_bal,
                 poly_balance_before=poly_bal,
+                kalshi_balance_after=k_bal_after,
+                poly_balance_after=poly_bal_after,
             )
 
         # Both legs filled
@@ -258,6 +282,14 @@ class ArbExecutor:
             km.platform_id, units, k_cost, p_cost, total_cost, guaranteed_profit, opp.spread_cents,
         )
 
+        k_bal_after, poly_bal_after = self._reconcile_balances(
+            label=km.platform_id,
+            k_bal_before=k_bal,
+            poly_bal_before=poly_bal,
+            expected_k_delta=-k_cost,
+            expected_p_delta=-p_cost,
+        )
+
         self._set_cooldown(opp, EXEC_COOLDOWN_CYCLES)
         return ExecutionResult(
             status="filled",
@@ -269,8 +301,86 @@ class ArbExecutor:
             total_cost_usd=total_cost,
             spread_cents=opp.spread_cents,
             guaranteed_profit_usd=guaranteed_profit,
+            kalshi_balance_before=k_bal,
             poly_balance_before=poly_bal,
+            kalshi_balance_after=k_bal_after,
+            poly_balance_after=poly_bal_after,
         )
+
+    # ------------------------------------------------------------------
+    # Post-trade balance reconciliation
+    # ------------------------------------------------------------------
+
+    _RECONCILE_GAP_THRESHOLD = 0.50  # Warn if actual delta differs from expected by more than $0.50
+
+    def _reconcile_balances(
+        self,
+        label: str,
+        k_bal_before: float | None,
+        poly_bal_before: float | None,
+        expected_k_delta: float,
+        expected_p_delta: float,
+    ) -> tuple[float | None, float | None]:
+        """
+        Fetch fresh balances from both platforms after a trade and compare
+        them to what we expected based on the fill costs.
+
+        Logs a WARNING if either platform's actual balance delta differs
+        from the expected delta by more than _RECONCILE_GAP_THRESHOLD,
+        which may indicate the trade did not settle as logged.
+
+        Returns (k_bal_after, poly_bal_after) — either may be None on error.
+        """
+        try:
+            k_bal_after: float | None = self._kalshi.get_balance()
+        except Exception as exc:
+            log.warning("RECONCILE | Could not fetch Kalshi balance after trade: %s", exc)
+            k_bal_after = None
+
+        try:
+            poly_bal_after: float | None = self._poly.get_usdc_balance()
+        except Exception as exc:
+            log.warning("RECONCILE | Could not fetch Poly balance after trade: %s", exc)
+            poly_bal_after = None
+
+        log.info("RECONCILE | %s | Balances after: Kalshi=$%.2f  Poly=$%.2f",
+                 label,
+                 k_bal_after if k_bal_after is not None else -1,
+                 poly_bal_after if poly_bal_after is not None else -1)
+
+        # Kalshi reconciliation
+        if k_bal_before is not None and k_bal_after is not None:
+            actual_k_delta = k_bal_after - k_bal_before
+            k_gap = abs(actual_k_delta - expected_k_delta)
+            if k_gap > self._RECONCILE_GAP_THRESHOLD:
+                log.warning(
+                    "RECONCILE WARNING | %s | Kalshi balance gap $%.4f — "
+                    "expected delta=$%.4f  actual delta=$%.4f  "
+                    "(before=$%.2f  after=$%.2f) — verify trade settled correctly",
+                    label, k_gap, expected_k_delta, actual_k_delta,
+                    k_bal_before, k_bal_after,
+                )
+            else:
+                log.info("RECONCILE OK | %s | Kalshi delta=$%.4f (expected=$%.4f)",
+                         label, actual_k_delta, expected_k_delta)
+
+        # Poly reconciliation
+        if poly_bal_before is not None and poly_bal_after is not None:
+            actual_p_delta = poly_bal_after - poly_bal_before
+            p_gap = abs(actual_p_delta - expected_p_delta)
+            if p_gap > self._RECONCILE_GAP_THRESHOLD:
+                log.warning(
+                    "RECONCILE WARNING | %s | Poly balance gap $%.4f — "
+                    "expected delta=$%.4f  actual delta=$%.4f  "
+                    "(before=$%.2f  after=$%.2f) — verify trade settled correctly",
+                    label, p_gap, expected_p_delta, actual_p_delta,
+                    poly_bal_before, poly_bal_after,
+                )
+            else:
+                log.info("RECONCILE OK | %s | Poly delta=$%.4f (expected=$%.4f)",
+                         label, actual_p_delta, expected_p_delta)
+
+        return k_bal_after, poly_bal_after
 
     # ------------------------------------------------------------------
     # Cooldown management

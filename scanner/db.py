@@ -213,7 +213,7 @@ def log_trade(
     opp_id: int,
     opp: Opportunity,
     result,                             # ExecutionResult from arb_executor
-    poly_balance_before: float | None = None,
+    poly_balance_before: float | None = None,   # kept for backward compat; prefer result fields
 ) -> int:
     """Insert one trade row. Returns the new row id."""
     km = opp.pair.kalshi
@@ -272,8 +272,8 @@ def log_trade(
                 result.poly_order_id or None,
                 result.status,
                 result.reason or None,
-                None,                           # kalshi_balance_before (not exposed by executor)
-                poly_balance_before,
+                getattr(result, "kalshi_balance_before", None),
+                getattr(result, "poly_balance_before", None) or poly_balance_before,
             ),
         )
         conn.commit()

@@ -89,6 +89,8 @@ def _make_executor(max_trade_usd: float = 5.0) -> tuple[ArbExecutor, MagicMock, 
     p_trader = MagicMock()
     # Default: enough balance to pass the guard (tests that need $0 override explicitly)
     p_trader.get_usdc_balance.return_value = 100.0
+    # Default: Kalshi balance for reconciliation
+    k_trader.get_balance.return_value = 500.0
     # Default: Kalshi order fully filled (remaining_count=0)
     k_trader.get_order.return_value = {"order": {"remaining_count": 0}}
     executor = ArbExecutor(kalshi=k_trader, poly=p_trader, max_trade_usd=max_trade_usd)

@@ -389,8 +389,7 @@ def main() -> None:
                                     )
                                     # Persist trade and mark opportunity as executed
                                     mark_opportunity_executed(db, opp_id)
-                                    log_trade(db, opp_id, opp, result,
-                                              poly_balance_before=result.poly_balance_before)
+                                    log_trade(db, opp_id, opp, result)
                                 except Exception:
                                     log.exception(
                                         "Executor raised for %s",
