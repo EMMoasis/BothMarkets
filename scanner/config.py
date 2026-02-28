@@ -79,6 +79,9 @@ EXEC_MAX_UNITS_PER_MAP: int = 300
 EXEC_POLY_MIN_ORDER_USD: float = 1.0
 # Cycles to wait before re-executing on the same pair (1 cycle ≈ 2 seconds)
 EXEC_COOLDOWN_CYCLES: int = 5           # ~10s cooldown between trades on same pair
+# Cycles to wait after a Kalshi 0-fill before retrying that market.
+# Without this, the scanner hammers the same market every 2s after a book-miss.
+EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES: int = 15  # ~30s — gives book time to replenish
 # Seconds to wait before attempting to unwind a failed Kalshi leg
 EXEC_UNWIND_DELAY_SECONDS: float = 2.0
 

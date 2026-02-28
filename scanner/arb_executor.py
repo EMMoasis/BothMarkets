@@ -30,6 +30,7 @@ from typing import Any
 
 from scanner.config import (
     EXEC_COOLDOWN_CYCLES,
+    EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES,
     EXEC_MAX_TRADE_USD,
     EXEC_MAX_UNITS_PER_MAP,
     EXEC_POLY_MIN_ORDER_USD,
@@ -224,7 +225,14 @@ class ArbExecutor:
                     log.warning("EXEC | Could not cancel resting Kalshi remainder: %s", ce)
             if filled < 1:
                 log.warning("EXEC | Kalshi order placed but 0 contracts filled — aborting")
-                return ExecutionResult(status="skipped", reason="kalshi_no_fill")
+                # Apply cooldown so we don't hammer the same market every 2s.
+                # Without this, the scanner retries on every cycle until the book changes.
+                self._set_cooldown(opp, EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES)
+                log.info("EXEC SKIP (kalshi_no_fill) | %s — cooling down %ds",
+                         km.platform_id, EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES * 2)
+                return ExecutionResult(status="skipped", reason="kalshi_no_fill",
+                                       kalshi_balance_before=k_bal,
+                                       poly_balance_before=poly_bal)
             if filled != units:
                 log.info("EXEC | Adjusting Poly size from %d to %d (actual Kalshi fill)", units, filled)
                 units = filled
