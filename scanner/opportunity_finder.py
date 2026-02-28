@@ -156,7 +156,7 @@ class OpportunityFinder:
         else:
             market_label = f"{km.asset} {km.direction} ${km.threshold:.0f}"
 
-        log.info(
+        log.debug(
             "PAIR  | %s | %s UTC\n"
             "  Kalshi:     %s\n"
             "  Polymarket: %s\n"
@@ -268,6 +268,7 @@ def _evaluate_strategy(
     pm = pair.poly
     kalshi_depth = km.yes_ask_depth if kalshi_side == "YES" else km.no_ask_depth
     poly_depth   = pm.yes_ask_depth if poly_side   == "YES" else pm.no_ask_depth
+    poly_levels  = pm.yes_ask_levels if poly_side  == "YES" else pm.no_ask_levels
 
     return Opportunity(
         pair=pair,
@@ -282,6 +283,7 @@ def _evaluate_strategy(
         detected_at=now,
         kalshi_depth_shares=kalshi_depth,
         poly_depth_shares=poly_depth,
+        poly_ask_levels=poly_levels,
     )
 
 

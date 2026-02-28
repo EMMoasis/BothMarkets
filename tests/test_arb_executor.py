@@ -103,45 +103,86 @@ class TestCalcUnits:
     def test_basic_sizing(self):
         # k=55c p=40c combined=95c → $0.95/unit
         # max_trade_usd=5.0 → floor(5/0.95) = 5 units
-        units = _calc_units(55.0, 40.0, 100.0, 100.0, 5.0)
+        units, price = _calc_units(55.0, 40.0, 100.0, 100.0, 5.0)
         assert units == 5
+        assert price == 40.0
 
     def test_capped_by_kalshi_depth(self):
         # max_by_usd=5, but k_depth=3 → 3 units
-        units = _calc_units(55.0, 40.0, 3.0, 100.0, 5.0)
+        units, price = _calc_units(55.0, 40.0, 3.0, 100.0, 5.0)
         assert units == 3
+        assert price == 40.0
 
     def test_capped_by_poly_depth(self):
         # max_by_usd=5, p_depth=4, min_for_poly=ceil(1/0.40)=3 → 4 units
-        units = _calc_units(55.0, 40.0, 100.0, 4.0, 5.0)
+        units, price = _calc_units(55.0, 40.0, 100.0, 4.0, 5.0)
         assert units == 4
+        assert price == 40.0
 
     def test_depth_none_uses_usd_cap(self):
         # No depth info → use only max_trade_usd
-        units = _calc_units(55.0, 40.0, None, None, 5.0)
+        units, price = _calc_units(55.0, 40.0, None, None, 5.0)
         assert units == 5
+        assert price == 40.0
 
     def test_zero_price_returns_zero(self):
-        assert _calc_units(0.0, 40.0, 100.0, 100.0, 5.0) == 0
-        assert _calc_units(55.0, 0.0, 100.0, 100.0, 5.0) == 0
+        assert _calc_units(0.0, 40.0, 100.0, 100.0, 5.0) == (0, 0.0)
+        assert _calc_units(55.0, 0.0, 100.0, 100.0, 5.0) == (0, 0.0)
 
-    def test_below_poly_minimum_returns_zero(self):
+    def test_below_poly_minimum_no_levels_returns_zero(self):
         # p=40c per unit → min_for_poly = ceil(1.0/0.40) = 3
-        # But depth=2 → below minimum → 0
-        units = _calc_units(55.0, 40.0, 2.0, 2.0, 5.0)
+        # depth=2, no book levels → skip
+        units, price = _calc_units(55.0, 40.0, 2.0, 2.0, 5.0)
         assert units == 0
+        assert price == 0.0
 
     def test_large_depth_limited_by_usd(self):
         # k=30c, p=60c combined=90c, min_for_poly=ceil(1/0.60)=2
         # max_by_usd=floor(2.0/0.90)=2 >= min_for_poly=2 → 2 units
-        units = _calc_units(30.0, 60.0, 1000.0, 1000.0, 2.0)
+        units, price = _calc_units(30.0, 60.0, 1000.0, 1000.0, 2.0)
         assert units == 2
+        assert price == 60.0
 
     def test_high_price_near_100c(self):
         # k=80c p=50c combined=130c (edge case near combined=100c)
         # max_by_usd=floor(5/1.30)=3, min_for_poly=ceil(1/0.50)=2 → 3 units
-        units = _calc_units(80.0, 50.0, 100.0, 100.0, 5.0)
+        units, price = _calc_units(80.0, 50.0, 100.0, 100.0, 5.0)
         assert units == 3
+        assert price == 50.0
+
+    # --- Book-walk tests ---
+
+    def test_book_walk_meets_minimum(self):
+        # k=72c, p=18c best-ask (5 shares) → min_for_poly=ceil(1/0.18)=6
+        # depth=5, best ask only has 5 → need to walk
+        # Next level: 20c with 10 shares → can collect 1 more from it
+        # blended = (5*18 + 1*20)/6 = (90+20)/6 = 18.33c
+        # new spread = 100 - 72 - 18.33 = 9.67c > MIN (3.3c) → valid
+        levels = [(18.0, 5.0), (20.0, 10.0)]
+        units, price = _calc_units(72.0, 18.0, 300.0, 5.0, 50.0, poly_ask_levels=levels)
+        assert units == 6
+        assert round(price, 4) == round((5*18 + 1*20) / 6, 4)
+
+    def test_book_walk_spread_too_tight_after_blend(self):
+        # k=72c, p=24c best-ask (1 share) → min_for_poly=ceil(1/0.24)=5
+        # Next levels very expensive: 70c → blended ≈ 65c+ → spread goes negative
+        levels = [(24.0, 1.0), (70.0, 100.0)]
+        units, price = _calc_units(72.0, 24.0, 300.0, 1.0, 50.0, poly_ask_levels=levels)
+        assert units == 0
+        assert price == 0.0
+
+    def test_book_walk_no_levels_returns_zero(self):
+        # Depth too thin and no levels provided
+        units, price = _calc_units(72.0, 18.0, 300.0, 2.0, 50.0, poly_ask_levels=[])
+        assert units == 0
+        assert price == 0.0
+
+    def test_book_walk_insufficient_total_depth(self):
+        # Even walking the whole book doesn't reach minimum
+        levels = [(18.0, 2.0), (20.0, 2.0)]  # total 4, need 6
+        units, price = _calc_units(72.0, 18.0, 300.0, 2.0, 50.0, poly_ask_levels=levels)
+        assert units == 0
+        assert price == 0.0
 
 
 # ---------------------------------------------------------------------------

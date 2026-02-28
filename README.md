@@ -35,14 +35,13 @@ Then one of those contracts always pays out 100c, locking in a 3c profit per sha
 |------|---------|
 | `scanner/runner.py` | Main entry point — two-speed loop, logging setup, executor initialization |
 | `scanner/kalshi_client.py` | Fetches and normalizes Kalshi markets; polls live prices and orderbook depth |
-| `scanner/poly_client.py` | Fetches Polymarket markets via Gamma API; polls CLOB prices per token |
+| `scanner/poly_client.py` | Fetches Polymarket markets via Gamma API; polls CLOB prices and full ask ladder per token |
 | `scanner/market_matcher.py` | Matches Kalshi and Polymarket markets by sport, team, opponent, date, subtype, and map number |
 | `scanner/opportunity_finder.py` | Detects arbitrage from matched pair prices; tiers opportunities by spread size |
-| `scanner/match_validator.py` | Verifies sports matches are actually scheduled on Liquipedia before allowing trades |
-| `scanner/arb_executor.py` | Executes two-leg trades; handles position sizing, cooldowns, and Kalshi unwind on Polymarket failure |
+| `scanner/match_validator.py` | Verifies sports matches are actually scheduled on Liquipedia before allowing trades (disabled by default) |
+| `scanner/arb_executor.py` | Executes two-leg trades; handles position sizing, book-walk, cooldowns, and Kalshi unwind on Polymarket failure |
 | `scanner/kalshi_trader.py` | Kalshi order placement via RSA-PS256 signed REST API |
 | `scanner/poly_trader.py` | Polymarket order placement via `py-clob-client` (sig_type=2 proxy mode) |
-| `scanner/market_matcher.py` | 6-criteria sports matching; 4-criteria crypto matching (disabled by default) |
 | `scanner/models.py` | `NormalizedMarket`, `MatchedPair`, `Opportunity` dataclasses |
 | `scanner/config.py` | All constants (timing, thresholds, env var names, API URLs) |
 | `scanner/db.py` | SQLite persistence — `init_db`, `log_opportunity`, `log_trade` |
@@ -84,33 +83,35 @@ Opportunities below 3.3c (`MIN_SPREAD_CENTS`) are ignored.
 
 ## Match Validation
 
-Before placing any trade on a sports market, the scanner verifies the match is actually scheduled on **[Liquipedia](https://liquipedia.net)** — the authoritative esports match database.
+Before placing any trade on a sports market, the scanner can verify the match is actually scheduled on **[Liquipedia](https://liquipedia.net)** — the authoritative esports match database. This prevents losses from markets that open speculatively for matches that are never confirmed or get cancelled before play (e.g. the real-world BHE vs ShindeN loss that prompted this feature).
 
-This prevents losses from markets that open speculatively for matches that are never confirmed or get cancelled before play (e.g. the real-world BHE vs ShindeN loss that prompted this feature).
+**Current status:** `MATCH_VALIDATION_ENABLED = False` — disabled because the Liquipedia API requires a paid subscription (~$50/month). The full implementation is preserved and can be re-enabled at any time.
 
-**How it works:**
-1. Before evaluating opportunities for a sports pair, `match_validator.py` fetches Liquipedia's upcoming matches page for that sport
-2. Both team names are fuzzy-matched against the Liquipedia team list (substring match + SequenceMatcher ratio ≥ 0.72)
+**How it works (when enabled):**
+1. Before evaluating opportunities for a sports pair, `match_validator.py` calls the **Liquipedia API v3** (`/api/v3/match`) with a 72-hour lookahead window
+2. Both team names are fuzzy-matched against the returned team list (substring match + SequenceMatcher ratio ≥ 0.72)
 3. If either team is missing → the pair is **skipped entirely** (no opportunity logged, no trade)
-4. If Liquipedia is unavailable (timeout, etc.) → the pair is **allowed with a warning** (fail open)
-5. Results are cached **per sport** for **30 minutes** — only one HTTP request per sport per half-hour
+4. If Liquipedia is unavailable (no API key, timeout, etc.) → the pair is **allowed with a warning** (fail open)
+5. Results are cached **per sport** for **30 minutes** — only one API call per sport per half-hour
 
 **Supported sports (validated against Liquipedia):**
 
-| Sport | Liquipedia URL |
-|-------|---------------|
-| CS2 | liquipedia.net/counterstrike/Matches |
-| LOL | liquipedia.net/leagueoflegends/Matches |
-| VALORANT | liquipedia.net/valorant/Matches |
-| DOTA2 | liquipedia.net/dota2/Matches |
-| RL | liquipedia.net/rocketleague/Matches |
+| Sport | Liquipedia Wiki |
+|-------|----------------|
+| CS2 | `counterstrike` |
+| LOL | `leagueoflegends` |
+| VALORANT | `valorant` |
+| DOTA2 | `dota2` |
+| RL | `rocketleague` |
 
-Traditional sports (NBA, NFL, NHL, MLB, Soccer) pass through without validation — no equivalent Liquipedia match page.
+Traditional sports (NBA, NFL, NHL, MLB, Soccer) pass through without validation — no equivalent Liquipedia match schedule.
 
 | Config | Default | Description |
 |--------|---------|-------------|
-| `MATCH_VALIDATION_ENABLED` | `True` | Enable/disable the Liquipedia check |
+| `MATCH_VALIDATION_ENABLED` | `False` | Enable/disable the Liquipedia check (requires API key) |
 | `SKIP_UNVERIFIED_MATCHES` | `True` | Skip unverified pairs (`False` = warn only, still trade) |
+
+To enable, set `MATCH_VALIDATION_ENABLED = True` in `config.py` and add `LIQUIPEDIA_API_KEY` to your `.env`. Free key available at [api.liquipedia.net](https://api.liquipedia.net/).
 
 ---
 
@@ -135,10 +136,10 @@ py -m scanner.runner --paper
 ============================================================
   PAPER TRADING REPORT
 ============================================================
-  Initial capital   :  $10,000.00
-  Kalshi balance    :   $4,623.40
-  Poly balance      :   $4,234.12
-  Deployed          :   $1,142.48  (11.4% of capital)
+  Initial capital   :  $20,000.00
+  Kalshi balance    :   $9,623.40
+  Poly balance      :   $9,234.12
+  Deployed          :   $1,142.48  (5.7% of capital)
 
   Trades simulated  : 34
   Gross profit      :      $62.34
@@ -181,6 +182,10 @@ POLY_API_KEY=<uuid>
 POLY_API_SECRET=<base64>
 POLY_API_PASSPHRASE=<hex>
 POLY_FUNDER=<Bot proxy wallet address>
+
+# Liquipedia API (optional — only needed if MATCH_VALIDATION_ENABLED = True)
+# Free key at https://api.liquipedia.net/
+LIQUIPEDIA_API_KEY=<your_key>
 ```
 
 The scanner runs in **scan-only mode** (no trades placed) if any credential is missing.
@@ -218,12 +223,22 @@ units = min(
     floor(max_trade_usd / (k_price + p_price)),  # dollar cap
     kalshi_depth_at_best_ask,                     # Kalshi liquidity
     poly_depth_at_best_ask,                       # Polymarket liquidity
+    EXEC_MAX_UNITS_PER_MAP,                       # hard cap per map market (300)
 )
 ```
 
+If the resulting unit count is below Polymarket's $1 minimum order but additional depth exists at higher price levels, the executor **book-walks** the Polymarket ask ladder:
+
+1. Collects shares level by level until the $1 minimum is met
+2. Computes a **blended (weighted average) price** across all levels consumed
+3. Re-checks whether the spread is still above `MIN_SPREAD_CENTS` at the blended price
+4. If yes — executes at the blended price; if no — skips the trade
+
+This prevents thin-depth markets from being silently skipped when just a few extra shares at the next level would make the trade viable.
+
 - Max total spend per trade: `$50.00` (configurable via `EXEC_MAX_TRADE_USD` in `config.py`)
 - Polymarket minimum order: `$1.00` per leg (`EXEC_POLY_MIN_ORDER_USD`)
-- If calculated units don't meet the Polymarket minimum, the trade is skipped
+- Hard cap per map market: `300` units (`EXEC_MAX_UNITS_PER_MAP`)
 
 ### Execution Order
 
@@ -260,6 +275,9 @@ units = min(
 # Start the scanner (from the bothmarkets/ directory)
 py -m scanner.runner
 
+# Paper trade mode (no real orders)
+py -m scanner.runner --paper
+
 # Run tests
 py -m pytest tests/ -v
 ```
@@ -276,6 +294,7 @@ The scanner loads `.env` automatically from the project root on startup.
 | `opportunities.log` | Filtered log: matched pairs, arbitrage opportunities, and execution events only |
 | `opportunities.json` | NDJSON — one JSON object per price cycle that found opportunities, with full opportunity details |
 | `scanner.db` | SQLite database — `opportunities` and `trades` tables (see below) |
+| `scanner_paper.db` | Separate SQLite database used in `--paper` (dry-run) mode |
 
 ### SQLite Database (`scanner.db`)
 
@@ -310,7 +329,7 @@ The scanner loads `.env` automatically from the project root on startup.
 | `kalshi_side` / `poly_side` | Sides traded |
 | `requested_units` | Units calculated before placing order |
 | `kalshi_filled` / `poly_filled` | Actual contracts/shares filled |
-| `kalshi_price_cents` / `poly_price_cents` | Prices at execution time |
+| `kalshi_price_cents` / `poly_price_cents` | Prices at execution time (blended if book-walked) |
 | `kalshi_cost_usd` / `poly_cost_usd` / `total_cost_usd` | USD spent per leg and combined |
 | `locked_profit_usd` | Guaranteed gross profit before fees (spread × units / 100) |
 | `kalshi_fee_usd` | Kalshi taker fee: 1.75% of face value (filled contracts × $1) |
@@ -336,11 +355,11 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 
 ## Test Coverage
 
-321 tests across 9 test files:
+325 tests across 9 test files:
 
 | File | Tests |
 |------|-------|
-| `tests/test_arb_executor.py` | 29 |
+| `tests/test_arb_executor.py` | 33 |
 | `tests/test_kalshi_client.py` | 75 |
 | `tests/test_kalshi_trader.py` | 23 |
 | `tests/test_market_matcher.py` | 37 |
@@ -363,11 +382,12 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | `CRYPTO_MATCHING_ENABLED` | `False` | Enable/disable crypto market matching |
 | `MIN_SPREAD_CENTS` | `3.3` | Minimum spread to report an opportunity |
 | `EXEC_MAX_TRADE_USD` | `50.0` | Maximum combined spend per trade (both legs) |
+| `EXEC_MAX_UNITS_PER_MAP` | `300` | Hard cap on units per single map market |
 | `EXEC_POLY_MIN_ORDER_USD` | `1.0` | Minimum Polymarket order size per leg |
 | `EXEC_COOLDOWN_CYCLES` | `5` | Price cycles to wait between trades on same pair (~10s) |
 | `EXEC_UNWIND_DELAY_SECONDS` | `2.0` | Delay before first Kalshi unwind attempt |
 | `KALSHI_TAKER_FEE_RATE` | `0.0175` | Kalshi taker fee rate (1.75% of face value per fill) |
-| `MATCH_VALIDATION_ENABLED` | `True` | Verify sports matches on Liquipedia before trading |
+| `MATCH_VALIDATION_ENABLED` | `False` | Enable/disable Liquipedia match validation (requires API key, ~$50/mo) |
 | `SKIP_UNVERIFIED_MATCHES` | `True` | Skip pair if not found on Liquipedia (`False` = warn only) |
 | `FETCH_WORKERS` | `20` | Parallel threads for CLOB price fetching |
 
@@ -382,4 +402,5 @@ The project includes `.claude/launch.json` (in the parent `.claude/` directory) 
 | Kalshi orderbook | `GET https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook` — authoritative price source + depth |
 | Kalshi order placement | `POST https://api.elections.kalshi.com/trade-api/v2/portfolio/orders` |
 | Polymarket market list | `GET https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=500` |
-| Polymarket CLOB prices | `GET https://clob.polymarket.com/book?token_id={token_id}` |
+| Polymarket CLOB prices | `GET https://clob.polymarket.com/book?token_id={token_id}` — returns full ask ladder for book-walk |
+| Liquipedia matches | `GET https://api.liquipedia.net/api/v3/match` — requires API key |

@@ -209,12 +209,14 @@ def _update_pair_prices(
         )
         pm_updated = NormalizedMarket(
             **{**pair.poly.__dict__,
-               "yes_ask_cents":  pp.get("yes_ask",       pair.poly.yes_ask_cents),
-               "no_ask_cents":   pp.get("no_ask",        pair.poly.no_ask_cents),
-               "yes_bid_cents":  pp.get("yes_bid",       pair.poly.yes_bid_cents),
-               "no_bid_cents":   pp.get("no_bid",        pair.poly.no_bid_cents),
-               "yes_ask_depth":  pp.get("yes_ask_depth", pair.poly.yes_ask_depth),
-               "no_ask_depth":   pp.get("no_ask_depth",  pair.poly.no_ask_depth),
+               "yes_ask_cents":   pp.get("yes_ask",        pair.poly.yes_ask_cents),
+               "no_ask_cents":    pp.get("no_ask",         pair.poly.no_ask_cents),
+               "yes_bid_cents":   pp.get("yes_bid",        pair.poly.yes_bid_cents),
+               "no_bid_cents":    pp.get("no_bid",         pair.poly.no_bid_cents),
+               "yes_ask_depth":   pp.get("yes_ask_depth",  pair.poly.yes_ask_depth),
+               "no_ask_depth":    pp.get("no_ask_depth",   pair.poly.no_ask_depth),
+               "yes_ask_levels":  pp.get("yes_ask_levels", pair.poly.yes_ask_levels),
+               "no_ask_levels":   pp.get("no_ask_levels",  pair.poly.no_ask_levels),
                }
         )
         updated.append(MatchedPair(kalshi=km_updated, poly=pm_updated))

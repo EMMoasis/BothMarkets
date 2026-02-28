@@ -31,8 +31,10 @@ from typing import Any
 from scanner.config import (
     EXEC_COOLDOWN_CYCLES,
     EXEC_MAX_TRADE_USD,
+    EXEC_MAX_UNITS_PER_MAP,
     EXEC_POLY_MIN_ORDER_USD,
     EXEC_UNWIND_DELAY_SECONDS,
+    MIN_SPREAD_CENTS,
 )
 from scanner.kalshi_trader import KalshiTrader
 from scanner.models import Opportunity
@@ -139,12 +141,14 @@ class ArbExecutor:
             )
             return ExecutionResult(status="skipped", reason="poly_insufficient_balance")
 
-        # Position sizing
-        units = _calc_units(
+        # Position sizing — may walk the book and return a blended poly price
+        units, effective_p_price = _calc_units(
             k_price_cents, p_price_cents,
             k_depth, p_depth,
             self._max_trade_usd,
+            poly_ask_levels=opp.poly_ask_levels or [],
         )
+        p_price_cents = effective_p_price  # may be blended if book was walked
         if units < 1:
             log.info(
                 "EXEC SKIP | %s | units=0 (k=%.1fc p=%.1fc max=$%.0f depth: k=%s p=%s)",
@@ -343,19 +347,26 @@ def _calc_units(
     k_depth: float | None,
     p_depth: float | None,
     max_trade_usd: float,
-) -> int:
+    poly_ask_levels: list[tuple[float, float]] | None = None,
+) -> tuple[int, float]:
     """
-    Calculate the number of contracts/shares to trade.
+    Calculate the number of contracts/shares to trade and the effective Polymarket price.
 
     Constraints:
       1. Total combined cost ≤ max_trade_usd
       2. Available depth at best ask on both sides
       3. Polymarket minimum order size: EXEC_POLY_MIN_ORDER_USD per leg
 
-    Returns 0 if the trade cannot be made.
+    When best-ask depth on Polymarket is below the $1 minimum, the function walks
+    the ask ladder (poly_ask_levels) to accumulate enough shares.  The spread is
+    re-checked after blending; if it falls below MIN_SPREAD_CENTS the trade is
+    still rejected.
+
+    Returns (units, effective_poly_price_cents).
+    Returns (0, 0.0) if the trade cannot be made.
     """
     if k_price_cents <= 0 or p_price_cents <= 0:
-        return 0
+        return 0, 0.0
 
     k_price_frac = k_price_cents / 100.0
     p_price_frac = p_price_cents / 100.0
@@ -371,6 +382,9 @@ def _calc_units(
     if p_depth is not None:
         max_by_depth = min(max_by_depth, int(p_depth))
 
+    # Hard cap per map market to avoid over-investment on thin books
+    max_by_depth = min(max_by_depth, EXEC_MAX_UNITS_PER_MAP)
+
     units = max_by_depth
 
     # Minimum: enough units so Polymarket leg meets $1 minimum
@@ -379,11 +393,58 @@ def _calc_units(
     else:
         min_for_poly = 1
 
-    if units < min_for_poly:
+    if units >= min_for_poly:
+        # Happy path: best-ask depth is sufficient
+        return units, p_price_cents
+
+    # --- Book-walk fallback ---
+    # Best-ask depth is below the $1 minimum. Try to collect enough shares by
+    # consuming additional ask levels, blending the price as we go.
+    if not poly_ask_levels:
         log.debug(
-            "_calc_units: units=%d below poly minimum=%d — skipping",
+            "_calc_units: units=%d below poly minimum=%d and no book levels — skipping",
             units, min_for_poly,
         )
-        return 0
+        return 0, 0.0
 
-    return units
+    collected = 0
+    total_poly_cost_cents = 0.0
+    for level_price, level_size in poly_ask_levels:   # sorted ascending = best ask first
+        if collected >= min_for_poly:
+            break
+        take = min(int(level_size), min_for_poly - collected)
+        collected += take
+        total_poly_cost_cents += take * level_price
+
+    if collected < min_for_poly:
+        log.debug(
+            "_calc_units: walked full book (%d levels), only %d/%d units — skipping",
+            len(poly_ask_levels), collected, min_for_poly,
+        )
+        return 0, 0.0
+
+    blended_price = total_poly_cost_cents / collected
+
+    # Re-check spread with the blended (higher) poly price
+    new_spread = 100.0 - k_price_cents - blended_price
+    if new_spread < MIN_SPREAD_CENTS:
+        log.debug(
+            "_calc_units: book-walk blended poly=%.2fc → spread=%.2fc < min %.2fc — skipping",
+            blended_price, new_spread, MIN_SPREAD_CENTS,
+        )
+        return 0, 0.0
+
+    # Re-cap by Kalshi depth and dollar cap at the new blended combined cost
+    blended_combined_frac = (k_price_cents + blended_price) / 100.0
+    max_by_usd_blended = int(max_trade_usd / blended_combined_frac) if blended_combined_frac > 0 else 0
+    max_k = int(k_depth) if k_depth is not None else collected
+    final_units = min(collected, max_k, max_by_usd_blended)
+
+    if final_units < min_for_poly:
+        return 0, 0.0
+
+    log.info(
+        "_calc_units: book-walk filled %d units at blended poly=%.2fc (spread=%.2fc)",
+        final_units, blended_price, new_spread,
+    )
+    return final_units, blended_price

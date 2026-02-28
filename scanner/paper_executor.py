@@ -143,27 +143,35 @@ class PaperArbExecutor:
             )
             return ExecutionResult(status="skipped", reason="poly_insufficient_balance")
 
-        # Position sizing — same rules as real executor
-        units = _calc_units(
+        # Position sizing — same rules as real executor.
+        # _calc_units may walk the book and return a blended poly price.
+        units, effective_p_price = _calc_units(
             k_price_cents, p_price_cents,
             k_depth, p_depth,
             self._max_trade_usd,
+            poly_ask_levels=opp.poly_ask_levels or [],
         )
 
-        # Additionally cap by virtual wallet balances
-        if units > 0 and k_price_cents > 0 and p_price_cents > 0:
+        # Additionally cap by virtual wallet balances (use effective poly price)
+        if units > 0 and k_price_cents > 0 and effective_p_price > 0:
             max_by_k = int(self._wallet.kalshi_balance / (k_price_cents / 100.0))
-            max_by_p = int(self._wallet.poly_balance   / (p_price_cents / 100.0))
+            max_by_p = int(self._wallet.poly_balance   / (effective_p_price / 100.0))
             units = min(units, max_by_k, max_by_p)
 
         if units < 1:
             return ExecutionResult(status="skipped", reason="insufficient_units")
 
+        # Use the effective (possibly blended) poly price for cost calculation
+        p_price_cents = effective_p_price
+
         # --- Simulate fill ---
         k_cost          = round(units * k_price_cents / 100.0, 4)
         p_cost          = round(units * p_price_cents / 100.0, 4)
         total_cost      = round(k_cost + p_cost, 4)
-        gross_profit    = round(units * opp.spread_cents / 100.0, 4)
+        # Recalculate spread using effective price (may differ from opp.spread_cents
+        # when we walked the book and blended a higher poly price)
+        effective_spread = round(100.0 - k_price_cents - p_price_cents, 4)
+        gross_profit    = round(units * effective_spread / 100.0, 4)
         kalshi_fee      = round(units * KALSHI_TAKER_FEE_RATE, 4)
         net_profit      = round(gross_profit - kalshi_fee, 4)
 

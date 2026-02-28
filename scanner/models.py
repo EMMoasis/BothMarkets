@@ -70,6 +70,11 @@ class NormalizedMarket:
     yes_ask_depth: float | None = None   # Shares available at yes_ask price
     no_ask_depth: float | None = None    # Shares available at no_ask price
 
+    # --- Full ask ladder (Polymarket only). Each entry: (price_cents, size).
+    #     Sorted ascending (best/cheapest ask first). Empty list = unavailable. ---
+    yes_ask_levels: list[tuple[float, float]] = field(default_factory=list)
+    no_ask_levels:  list[tuple[float, float]] = field(default_factory=list)
+
     # --- Token IDs (Polymarket only, needed for CLOB price fetching) ---
     yes_token_id: str | None = None
     no_token_id: str | None = None
@@ -127,3 +132,7 @@ class Opportunity:
     # Depth at the relevant side's ask price (shares available). None = unknown.
     kalshi_depth_shares: float | None = None
     poly_depth_shares: float | None = None
+
+    # Full Polymarket ask ladder for the relevant side: [(price_cents, size), ...] ascending.
+    # Used by executor to walk the book when best-ask depth is below the $1 minimum.
+    poly_ask_levels: list[tuple[float, float]] = field(default_factory=list)

@@ -156,15 +156,17 @@ class PolyClient:
 
         results: dict[str, dict[str, float | None]] = {}
 
-        def fetch_one(market: NormalizedMarket) -> tuple[str, dict[str, float | None]]:
+        def fetch_one(market: NormalizedMarket) -> tuple[str, dict]:
             yes_ask = no_ask = yes_bid = no_bid = None
             yes_ask_depth = no_ask_depth = None
+            yes_ask_levels: list[tuple[float, float]] = []
+            no_ask_levels:  list[tuple[float, float]] = []
 
             if market.yes_token_id:
-                yes_ask, yes_bid, yes_ask_depth = _fetch_book(self._http, market.yes_token_id)
+                yes_ask, yes_bid, yes_ask_depth, yes_ask_levels = _fetch_book(self._http, market.yes_token_id)
 
             if market.no_token_id:
-                no_ask, no_bid, no_ask_depth = _fetch_book(self._http, market.no_token_id)
+                no_ask, no_bid, no_ask_depth, no_ask_levels = _fetch_book(self._http, market.no_token_id)
 
             return market.platform_id, {
                 "yes_ask": yes_ask,
@@ -173,6 +175,8 @@ class PolyClient:
                 "no_bid": no_bid,
                 "yes_ask_depth": yes_ask_depth,
                 "no_ask_depth": no_ask_depth,
+                "yes_ask_levels": yes_ask_levels,
+                "no_ask_levels":  no_ask_levels,
             }
 
         with ThreadPoolExecutor(max_workers=min(len(markets), FETCH_WORKERS)) as pool:
@@ -241,9 +245,11 @@ class PolyClient:
             all_tokens.update(ids)
 
         # Fetch all in parallel
-        token_prices: dict[str, tuple[float | None, float | None, float | None]] = {}
+        # Values: (ask_cents, bid_cents, ask_depth, ask_levels)
+        _BookEntry = tuple[float | None, float | None, float | None, list]
+        token_prices: dict[str, _BookEntry] = {}
 
-        def fetch_token(tid: str) -> tuple[str, tuple[float | None, float | None, float | None]]:
+        def fetch_token(tid: str) -> tuple[str, _BookEntry]:
             return tid, _fetch_book(self._http, tid)
 
         with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
@@ -254,16 +260,16 @@ class PolyClient:
                     token_prices[tid] = prices
                 except Exception:
                     tid = futures[future]
-                    token_prices[tid] = (None, None, None)
+                    token_prices[tid] = (None, None, None, [])
 
         # Inject into each market dict
         enriched_list: list[dict[str, Any]] = []
         for gm in gamma_markets:
             enriched = dict(gm)
             token_ids = _extract_all_token_ids(gm)
-            clob_prices: dict[str, tuple[float | None, float | None]] = {}
+            clob_prices: dict[str, _BookEntry] = {}
             for tid in token_ids:
-                clob_prices[tid] = token_prices.get(tid, (None, None))
+                clob_prices[tid] = token_prices.get(tid, (None, None, None, []))
             enriched["_clob_prices"] = clob_prices
             enriched_list.append(enriched)
 
@@ -389,9 +395,9 @@ def _normalize_sports_market(
         team_norm = normalize_team_name(team_raw)
         opp_norm = normalize_team_name(opp_raw)
 
-        # Prices and depth at best ask
-        yes_ask, yes_bid, yes_ask_depth = clob_prices.get(team_token_id, (None, None, None))
-        no_ask, no_bid, no_ask_depth = clob_prices.get(opp_token_id, (None, None, None)) if opp_token_id else (None, None, None)
+        # Prices, depth, and full ask levels at best ask
+        yes_ask, yes_bid, yes_ask_depth, yes_ask_levels = clob_prices.get(team_token_id, (None, None, None, []))
+        no_ask, no_bid, no_ask_depth, no_ask_levels = clob_prices.get(opp_token_id, (None, None, None, [])) if opp_token_id else (None, None, None, [])
 
         # Synthetic unique platform_id per team entry
         synthetic_id = f"{condition_id}_{team_norm}"
@@ -419,6 +425,8 @@ def _normalize_sports_market(
             no_bid_cents=no_bid,
             yes_ask_depth=yes_ask_depth,
             no_ask_depth=no_ask_depth,
+            yes_ask_levels=yes_ask_levels,
+            no_ask_levels=no_ask_levels,
             yes_token_id=team_token_id,
             no_token_id=opp_token_id,
             liquidity_usd=float(gm.get("liquidity") or 0),
@@ -449,10 +457,12 @@ def _normalize_crypto_market(
 
     yes_ask = yes_bid = no_ask = no_bid = None
     yes_ask_depth = no_ask_depth = None
+    yes_ask_levels: list[tuple[float, float]] = []
+    no_ask_levels:  list[tuple[float, float]] = []
     if yes_id:
-        yes_ask, yes_bid, yes_ask_depth = clob_prices.get(yes_id, (None, None, None))
+        yes_ask, yes_bid, yes_ask_depth, yes_ask_levels = clob_prices.get(yes_id, (None, None, None, []))
     if no_id:
-        no_ask, no_bid, no_ask_depth = clob_prices.get(no_id, (None, None, None))
+        no_ask, no_bid, no_ask_depth, no_ask_levels = clob_prices.get(no_id, (None, None, None, []))
 
     return NormalizedMarket(
         platform=Platform.POLYMARKET,
@@ -470,6 +480,8 @@ def _normalize_crypto_market(
         no_bid_cents=no_bid,
         yes_ask_depth=yes_ask_depth,
         no_ask_depth=no_ask_depth,
+        yes_ask_levels=yes_ask_levels,
+        no_ask_levels=no_ask_levels,
         yes_token_id=yes_id,
         no_token_id=no_id,
         liquidity_usd=float(gm.get("liquidity") or 0),
@@ -570,6 +582,7 @@ def _fetch_book(http: httpx.Client, token_id: str) -> tuple[float | None, float 
         best_bid = round(float(bids[-1]["price"]) * 100, 4) if bids else None
 
         if asks:
+            # CLOB asks are sorted DESCENDING → best ask (lowest price) is last
             best_ask_entry = asks[-1]
             best_ask = round(float(best_ask_entry["price"]) * 100, 4)
             # Sum all size at the best ask price level (price may repeat across entries)
@@ -580,14 +593,22 @@ def _fetch_book(http: httpx.Client, token_id: str) -> tuple[float | None, float 
                 if a.get("price") == best_ask_price_raw
             )
             ask_depth = round(ask_depth, 2)
+            # Full ask ladder sorted ASCENDING (best/cheapest ask first)
+            # Aggregate size per price level, then sort ascending.
+            level_map: dict[float, float] = {}
+            for a in asks:
+                p = round(float(a["price"]) * 100, 4)
+                level_map[p] = level_map.get(p, 0.0) + float(a["size"])
+            ask_levels: list[tuple[float, float]] = sorted(level_map.items())
         else:
             best_ask = None
             ask_depth = None
+            ask_levels = []
 
-        return best_ask, best_bid, ask_depth
+        return best_ask, best_bid, ask_depth, ask_levels
     except Exception:
         log.debug("CLOB fetch failed for token %s", token_id[:20], exc_info=True)
-        return None, None, None
+        return None, None, None, []
 
 
 def _gamma_in_window(gm: dict[str, Any], now: datetime, cutoff: datetime) -> bool:

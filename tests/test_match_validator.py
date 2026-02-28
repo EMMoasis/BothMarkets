@@ -1,5 +1,6 @@
 """Tests for match_validator — Liquipedia schedule verification."""
 
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
@@ -30,14 +31,15 @@ _SAMPLE_TEAMS = frozenset([
 ])
 
 
+@contextmanager
 def _patch_fetch(teams):
-    """Context manager: patch _fetch_liquipedia_teams to return *teams*.
-    The mock ignores the URL argument and always returns the given set.
+    """Context manager: patch _fetch_liquipedia_teams_api to return *teams*
+    and set a fake API key so the key-check passes.
+    The mock ignores the wiki argument and always returns the given set.
     """
-    return patch(
-        "scanner.match_validator._fetch_liquipedia_teams",
-        return_value=teams,
-    )
+    with patch("scanner.match_validator._get_api_key", return_value="fake-test-key"), \
+         patch("scanner.match_validator._fetch_liquipedia_teams_api", return_value=teams) as mock:
+        yield mock
 
 
 # ---------------------------------------------------------------------------
@@ -306,9 +308,12 @@ class TestOpportunityFinderIntegration:
 
     def test_cs2_unverified_match_skipped(self):
         from scanner.opportunity_finder import OpportunityFinder
+        import scanner.opportunity_finder as of_mod
         pair = self._make_sports_pair(sport="CS2")
         unknown_teams = frozenset(["Some Other Team"])
-        with _patch_fetch(unknown_teams):
+        # Force validation ON for this test (disabled globally to avoid API costs)
+        with patch.object(of_mod, "MATCH_VALIDATION_ENABLED", True), \
+             _patch_fetch(unknown_teams):
             opps = OpportunityFinder().find_opportunities([pair])
         assert len(opps) == 0
 
@@ -332,8 +337,11 @@ class TestOpportunityFinderIntegration:
     def test_lol_unverified_match_skipped(self):
         """LOL pairs not found on Liquipedia should be skipped."""
         from scanner.opportunity_finder import OpportunityFinder
+        import scanner.opportunity_finder as of_mod
         pair = self._make_sports_pair(sport="LOL", team="UnknownLOL", opponent="NoTeam")
-        with _patch_fetch(frozenset(["T1", "Gen.G"])):
+        # Force validation ON for this test (disabled globally to avoid API costs)
+        with patch.object(of_mod, "MATCH_VALIDATION_ENABLED", True), \
+             _patch_fetch(frozenset(["T1", "Gen.G"])):
             opps = OpportunityFinder().find_opportunities([pair])
         assert len(opps) == 0
 

@@ -67,12 +67,14 @@ POLY_TAKER_FEE_RATE: float = 0.0   # effectively 0 for all esports and standard 
 # --- Match validation ---
 # Before trading a sports market, verify the match appears on Liquipedia's
 # upcoming schedule.  Prevents arb losses from cancelled / never-scheduled events.
-MATCH_VALIDATION_ENABLED: bool = True
+MATCH_VALIDATION_ENABLED: bool = False  # Liquipedia API costs $50/mo — disabled for now, code kept as backup
 SKIP_UNVERIFIED_MATCHES: bool = True    # True = skip pair | False = allow with warning only
 
 # --- Execution layer ---
 # Maximum total USD spend per trade (both legs combined).
 EXEC_MAX_TRADE_USD: float = 50.0
+# Hard cap on units per single map market (prevents over-investment on thin markets).
+EXEC_MAX_UNITS_PER_MAP: int = 300
 # Minimum per Polymarket leg in USD (Polymarket rejects orders below ~$1)
 EXEC_POLY_MIN_ORDER_USD: float = 1.0
 # Cycles to wait before re-executing on the same pair (1 cycle ≈ 2 seconds)
@@ -81,6 +83,7 @@ EXEC_COOLDOWN_CYCLES: int = 5           # ~10s cooldown between trades on same p
 EXEC_UNWIND_DELAY_SECONDS: float = 2.0
 
 # --- Environment variable names ---
+ENV_LIQUIPEDIA_API_KEY = "LIQUIPEDIA_API_KEY"   # Free key: https://api.liquipedia.net/
 ENV_KALSHI_API_KEY = "KALSHI_API_KEY"
 ENV_KALSHI_API_SECRET = "KALSHI_API_SECRET"
 ENV_POLY_PRIVATE_KEY = "POLY_PRIVATE_KEY"

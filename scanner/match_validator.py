@@ -1,26 +1,33 @@
 """
 Validates that a sports match is actually scheduled before placing arb trades.
 
-Uses Liquipedia as the primary source — they explicitly allow bots with a
-proper User-Agent and a 1-req/2s rate limit.  Results are cached for 30 minutes
-so the scan loop only makes one network call per cache window.
+Uses the Liquipedia API v3 (https://api.liquipedia.net/) as the primary source.
+A free API key is required — register at https://api.liquipedia.net/ and set:
+
+    LIQUIPEDIA_API_KEY=<your_key>   in your .env file
+
+If the key is not set, validation is skipped and all matches are allowed through
+with a one-time warning.  Results are cached for 30 minutes so the scan loop
+makes at most one API call per sport per cache window.
 
 Supported sports (validated against Liquipedia):
   CS2, LOL, VALORANT, DOTA2, RL
 
-Unsupported sports (traditional / no Liquipedia Matches page):
-  NBA, NFL, NHL, MLB, SOCCER — these return None (allow through with no warning)
+Unsupported sports (traditional / not on Liquipedia):
+  NBA, NFL, NHL, MLB, SOCCER — these return None (allow through, no warning)
 
 Return values from `is_match_scheduled()`:
   True  — both teams found in upcoming Liquipedia matches  → trade
   False — one or both teams NOT found                      → skip pair
-  None  — Liquipedia unavailable (timeout, etc.)           → allow with warning
+  None  — Liquipedia unavailable / key missing             → allow with warning
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -29,29 +36,25 @@ import requests
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Liquipedia Matches URLs — one per supported esport
-# All share the same HTML structure so the same scraper works for every game.
+# Liquipedia API v3 — sport key → wiki slug
 # ---------------------------------------------------------------------------
-_LIQUIPEDIA_SPORT_URLS: dict[str, str] = {
-    "CS2":      "https://liquipedia.net/counterstrike/Matches",
-    "LOL":      "https://liquipedia.net/leagueoflegends/Matches",
-    "VALORANT": "https://liquipedia.net/valorant/Matches",
-    "DOTA2":    "https://liquipedia.net/dota2/Matches",
-    "RL":       "https://liquipedia.net/rocketleague/Matches",
+_LIQUIPEDIA_SPORT_WIKIS: dict[str, str] = {
+    "CS2":      "counterstrike",
+    "LOL":      "leagueoflegends",
+    "VALORANT": "valorant",
+    "DOTA2":    "dota2",
+    "RL":       "rocketleague",
 }
 
 # Exported so callers can check support without importing internals
-SUPPORTED_SPORTS: frozenset[str] = frozenset(_LIQUIPEDIA_SPORT_URLS.keys())
+SUPPORTED_SPORTS: frozenset[str] = frozenset(_LIQUIPEDIA_SPORT_WIKIS.keys())
 
-_HEADERS = {
-    # Liquipedia ToS requires a descriptive User-Agent for bots.
-    "User-Agent": "BothMarketsScanner/1.0 (educational arb research; respects rate limits)",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-}
-_CACHE_TTL_SECONDS = 1800   # 30 minutes between Liquipedia refreshes
-_HTTP_TIMEOUT = 8           # seconds
-_FUZZY_THRESHOLD = 0.72     # SequenceMatcher ratio to count as a match
+_API_BASE     = "https://api.liquipedia.net/api/v3"
+_CACHE_TTL_SECONDS = 1800   # 30 minutes between API refreshes
+_HTTP_TIMEOUT      = 12     # seconds
+_FUZZY_THRESHOLD   = 0.72   # SequenceMatcher ratio to count as a match
+# How far ahead to look for matches (hours)
+_LOOKAHEAD_HOURS   = 72
 
 # ---------------------------------------------------------------------------
 # Module-level cache:  sport_key → (frozenset_of_team_names, fetched_at)
@@ -61,7 +64,10 @@ _cache: dict[str, tuple[frozenset[str], float]] = {}
 # Per-pair result cache so we don't re-run fuzzy matching every 2s
 # key: (team, opponent, sport)  →  (result: bool|None, cached_at: float)
 _pair_cache: dict[tuple[str, str, str], tuple[Optional[bool], float]] = {}
-_PAIR_CACHE_TTL = _CACHE_TTL_SECONDS   # same window as team list
+_PAIR_CACHE_TTL = _CACHE_TTL_SECONDS
+
+# One-time warning flag so we don't spam the log every cycle
+_no_key_warned = False
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +86,8 @@ def is_match_scheduled(team: str, opponent: str, sport: str) -> Optional[bool]:
         False  — not found on Liquipedia           → skip pair
         None   — Liquipedia unavailable / sport not supported → allow with warning
     """
+    global _no_key_warned
+
     sport_upper = sport.upper()
 
     if sport_upper not in SUPPORTED_SPORTS:
@@ -87,6 +95,17 @@ def is_match_scheduled(team: str, opponent: str, sport: str) -> Optional[bool]:
 
     if not team or not opponent:
         return None  # Defensive: can't validate empty names
+
+    # If no API key configured, warn once and allow everything through
+    api_key = _get_api_key()
+    if not api_key:
+        if not _no_key_warned:
+            log.warning(
+                "match_validator | LIQUIPEDIA_API_KEY not set — "
+                "match validation disabled. Register free key at https://api.liquipedia.net/"
+            )
+            _no_key_warned = True
+        return None
 
     pair_key = (team.lower(), opponent.lower(), sport_upper)
     now = time.monotonic()
@@ -126,13 +145,20 @@ def is_match_scheduled(team: str, opponent: str, sport: str) -> Optional[bool]:
 
 def clear_cache() -> None:
     """Force a fresh Liquipedia fetch on the next validation call (used in tests)."""
+    global _no_key_warned
     _cache.clear()
     _pair_cache.clear()
+    _no_key_warned = False
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _get_api_key() -> str:
+    """Read LIQUIPEDIA_API_KEY from env. Returns empty string if not set."""
+    return os.environ.get("LIQUIPEDIA_API_KEY", "").strip()
+
 
 def _get_cached_team_list(sport: str, now: float) -> Optional[frozenset[str]]:
     """Return cached team set or fetch a fresh one. None = unavailable."""
@@ -142,54 +168,87 @@ def _get_cached_team_list(sport: str, now: float) -> Optional[frozenset[str]]:
         if now - fetched_at < _CACHE_TTL_SECONDS:
             return teams
 
-    url = _LIQUIPEDIA_SPORT_URLS[key]
-    teams = _fetch_liquipedia_teams(url)
+    wiki = _LIQUIPEDIA_SPORT_WIKIS[key]
+    teams = _fetch_liquipedia_teams_api(wiki)
     if teams is not None:
         _cache[key] = (teams, now)
     return teams
 
 
-def _fetch_liquipedia_teams(url: str) -> Optional[frozenset[str]]:
+def _fetch_liquipedia_teams_api(wiki: str) -> Optional[frozenset[str]]:
     """
-    HTTP GET a Liquipedia Matches page and extract all upcoming team names.
+    Fetch upcoming match participants via the Liquipedia API v3.
 
-    All esports on Liquipedia share the same HTML structure, so the same CSS
-    selectors work regardless of which game URL is requested.
+    Uses the /match endpoint with a time window of now → +72h.
+    Extracts all team names from match2opponents[].name.
 
-    Returns None on any error (caller treats as unavailable).
+    Returns a frozenset of team names, or None on error.
     """
+    api_key = _get_api_key()
+    if not api_key:
+        return None
+
+    now_utc = datetime.now(timezone.utc)
+    cutoff   = now_utc + timedelta(hours=_LOOKAHEAD_HOURS)
+    date_from = now_utc.strftime("%Y-%m-%d %H:%M:%S")
+    date_to   = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_HTTP_TIMEOUT)
+        resp = requests.get(
+            f"{_API_BASE}/match",
+            params={
+                "wiki":       wiki,
+                "conditions": (
+                    f"[[date_time_utc::>{date_from}]] "
+                    f"AND [[date_time_utc::<{date_to}]]"
+                ),
+                "query":  "match2opponents",
+                "limit":  "500",
+                "order":  "date_time_utc ASC",
+            },
+            headers={
+                "Authorization": f"Apikey {api_key}",
+                "User-Agent":    "BothMarketsScanner/1.0 (educational arb research)",
+                "Accept":        "application/json",
+            },
+            timeout=_HTTP_TIMEOUT,
+        )
+
+        if resp.status_code == 429:
+            log.warning("match_validator | Liquipedia API rate-limited (429) for wiki=%s", wiki)
+            return None
+        if resp.status_code == 401 or resp.status_code == 403:
+            log.warning(
+                "match_validator | Liquipedia API key rejected (HTTP %d) — "
+                "check LIQUIPEDIA_API_KEY in .env",
+                resp.status_code,
+            )
+            return None
         if resp.status_code != 200:
-            log.warning("match_validator | Liquipedia returned HTTP %d for %s", resp.status_code, url)
+            log.warning("match_validator | Liquipedia API returned HTTP %d for wiki=%s", resp.status_code, wiki)
             return None
 
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(resp.text, "html.parser")
+        data = resp.json()
+        matches = data.get("result", [])
 
         teams: set[str] = set()
-        # Liquipedia match rows: team names appear inside .team-left / .team-right,
-        # each typically contains a <span> with the display name.
-        # The same CSS structure is shared across all Liquipedia wikis.
-        for sel in (
-            ".team-left span",
-            ".team-right span",
-            ".matchTeamName",
-            ".team-template-text",
-        ):
-            for el in soup.select(sel):
-                name = el.get_text(strip=True)
+        for match in matches:
+            for opp in match.get("match2opponents", []):
+                name = (opp.get("name") or "").strip()
                 if name and name.upper() not in ("TBD", "TBA", ""):
                     teams.add(name)
 
-        log.info("match_validator | Fetched %d team names from %s", len(teams), url)
+        log.info(
+            "match_validator | API returned %d matches → %d team names (wiki=%s)",
+            len(matches), len(teams), wiki,
+        )
         return frozenset(teams) if teams else None
 
     except requests.Timeout:
-        log.warning("match_validator | Liquipedia request timed out (%s)", url)
+        log.warning("match_validator | Liquipedia API timed out (wiki=%s)", wiki)
         return None
     except Exception as exc:
-        log.warning("match_validator | Liquipedia fetch failed (%s): %s", url, exc)
+        log.warning("match_validator | Liquipedia API fetch failed (wiki=%s): %s", wiki, exc)
         return None
 
 
