@@ -156,7 +156,7 @@ class OpportunityFinder:
         else:
             market_label = f"{km.asset} {km.direction} ${km.threshold:.0f}"
 
-        log.debug(
+        log.info(
             "PAIR  | %s | %s UTC\n"
             "  Kalshi:     %s\n"
             "  Polymarket: %s\n"

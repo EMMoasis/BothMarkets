@@ -55,7 +55,7 @@ log = logging.getLogger(__name__)
 
 class _OppsFilter(logging.Filter):
     _KEYWORDS = (
-        "MATCH |", "PAIR  |", "ARB OPPORTUNITY",
+        "MATCH |", "ARB OPPORTUNITY",
         "SCAN CYCLE", "=== MARKET REFRESH",
         "EXEC |", "EXEC FILLED", "EXEC SKIP",
         "Kalshi order:", "Poly order:", "Kalshi unwind",
