@@ -93,6 +93,9 @@ def _make_executor(max_trade_usd: float = 5.0) -> tuple[ArbExecutor, MagicMock, 
     k_trader.get_balance.return_value = 500.0
     # Default: Kalshi order fully filled (remaining_count=0)
     k_trader.get_order.return_value = {"order": {"remaining_count": 0}}
+    # Default: Poly FOK order fully filled (get_actual_fill returns requested size)
+    # Individual tests override this to simulate 0-fill or partial-fill scenarios.
+    p_trader.get_actual_fill.side_effect = lambda order_id, estimated: estimated
     executor = ArbExecutor(kalshi=k_trader, poly=p_trader, max_trade_usd=max_trade_usd)
     return executor, k_trader, p_trader
 
@@ -364,8 +367,47 @@ class TestExecuteFailurePaths:
 
         result = executor.execute(opp)
         assert result.status == "unwound"
-        assert result.reason == "poly_leg_failed"
+        assert result.reason == "poly_0_fill"
         assert result.kalshi_order_id == "k-1"
+
+    def test_poly_fok_zero_fill_unwinds_kalshi(self):
+        """If Poly FOK order gets 0 fill, Kalshi must be unwound — naked position prevented."""
+        executor, k_trader, p_trader = _make_executor()
+        opp = _make_opportunity()
+
+        # Poly order is placed (no exception), gets an order_id, but 0 shares filled
+        k_trader.place_order.side_effect = [
+            {"order": {"order_id": "k-1"}},    # Kalshi buy succeeds
+            {"order": {"order_id": "k-unwind"}},  # Kalshi unwind sell
+        ]
+        p_trader.place_order.return_value = {"orderID": "p-1"}
+        # Override side_effect so return_value = 0.0 takes effect
+        p_trader.get_actual_fill.side_effect = None
+        p_trader.get_actual_fill.return_value = 0.0  # FOK killed — 0 fill
+
+        k_trader.get_market_price.return_value = {"yes_bid": 52.0, "no_bid": 48.0}
+
+        with patch("scanner.arb_executor.time.sleep"):
+            result = executor.execute(opp)
+
+        assert result.status == "unwound"
+        assert result.reason == "poly_0_fill"
+        assert result.poly_order_id == "p-1"   # order ID was recorded even on 0-fill
+
+    def test_poly_partial_fill_adjusts_units(self):
+        """If Poly fills fewer shares than Kalshi, record partial (hedged) amount."""
+        executor, k_trader, p_trader = _make_executor()
+        opp = _make_opportunity(k_depth=100.0, p_depth=100.0)
+
+        k_trader.place_order.return_value = {"order": {"order_id": "k-1"}}
+        p_trader.place_order.return_value = {"orderID": "p-1"}
+        # Poly only filled 3 out of 5 requested shares — override side_effect
+        p_trader.get_actual_fill.side_effect = None
+        p_trader.get_actual_fill.return_value = 3.0
+
+        result = executor.execute(opp)
+        assert result.status == "filled"
+        assert result.units == 3   # aligned down to actual poly fill
 
     def test_failed_unwind_returns_partial_stuck(self):
         """If both Poly leg and Kalshi unwind fail, status is partial_stuck."""

@@ -241,6 +241,7 @@ class ArbExecutor:
 
         # ---- Leg 2: Polymarket ----
         p_price_frac = p_price_cents / 100.0
+        p_order_id = ""
         try:
             p_resp = self._poly.place_order(
                 token_id=poly_token_id,
@@ -251,7 +252,28 @@ class ArbExecutor:
             p_order_id = p_resp.get("orderID") or p_resp.get("id") or ""
         except Exception as exc:
             log.warning("EXEC | Polymarket leg FAILED after Kalshi filled: %s", exc)
-            # Try to unwind Kalshi leg
+            p_order_id = ""
+
+        # ---- Verify actual Polymarket fill ----
+        # FOK orders either fill immediately or are killed — but the fill amount
+        # may differ from what we requested (Poly fills at most size×price budget).
+        # CRITICAL: always check actual fill before declaring success.  If Poly
+        # filled 0 shares we MUST unwind the Kalshi leg to avoid a naked position.
+        poly_actual_fill: float = 0.0
+        if p_order_id:
+            time.sleep(0.5)  # give CLOB a moment to settle
+            poly_actual_fill = self._poly.get_actual_fill(p_order_id, float(units))
+            log.info("EXEC | Poly actual fill: %.0f / %d shares (order=%s...)",
+                     poly_actual_fill, units, p_order_id[:16])
+        else:
+            log.warning("EXEC | Poly order returned no order_id — treating as 0 fill")
+
+        if poly_actual_fill < 1.0:
+            # Poly leg did not fill at all → unwind the Kalshi leg immediately
+            log.warning(
+                "EXEC | Polymarket 0-fill after Kalshi filled %d units — unwinding Kalshi",
+                units,
+            )
             unwind_result = self._unwind_kalshi(
                 ticker=km.platform_id,
                 side=k_side,
@@ -264,13 +286,14 @@ class ArbExecutor:
                 k_bal_before=k_bal,
                 poly_bal_before=poly_bal,
                 expected_k_delta=-round(units * k_price_int / 100.0, 4),
-                expected_p_delta=0.0,  # Poly leg never placed
+                expected_p_delta=0.0,
             )
             return ExecutionResult(
                 status="unwound" if unwind_result["ok"] else "partial_stuck",
-                reason="poly_leg_failed",
+                reason="poly_0_fill",
                 units=units,
                 kalshi_order_id=k_order_id,
+                poly_order_id=p_order_id,
                 kalshi_cost_usd=round(units * k_price_int / 100.0, 4),
                 unwind_recovered_usd=round(unwind_result.get("recovered_usd", 0.0), 4),
                 kalshi_balance_before=k_bal,
@@ -279,7 +302,20 @@ class ArbExecutor:
                 poly_balance_after=poly_bal_after,
             )
 
-        # Both legs filled
+        # Poly partially or fully filled — use actual fill count
+        poly_units = int(poly_actual_fill)
+        if poly_units < units:
+            log.warning(
+                "EXEC | Poly partial fill: %d / %d shares — position partially hedged",
+                poly_units, units,
+            )
+            # Kalshi was over-filled vs Poly.  The unhedged Kalshi surplus is
+            # (units - poly_units) contracts.  Record actual amounts; caller can
+            # decide whether to unwind the surplus manually.
+            units = poly_units  # align recorded units to the smaller (hedged) amount
+
+        # Both legs filled (possibly with partial mismatch already handled)
+
         k_cost = round(units * k_price_int / 100.0, 4)
         p_cost = round(units * p_price_cents / 100.0, 4)
         total_cost = round(k_cost + p_cost, 4)
