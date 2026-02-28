@@ -183,6 +183,7 @@ class MarketMatcher:
 
         pairs: list[MatchedPair] = []
         rejected: dict[str, int] = {}
+        no_candidates: dict[str, int] = {}   # subtype → count of Kalshi markets with 0 Poly candidates
 
         for km in kalshi:
             if km.platform_id in used_kalshi:
@@ -190,6 +191,15 @@ class MarketMatcher:
 
             # Look for Poly markets with same sport + team + subtype
             candidates = poly_index.get((km.sport, km.team, km.sport_subtype), [])
+
+            if not candidates:
+                key = km.sport_subtype
+                no_candidates[key] = no_candidates.get(key, 0) + 1
+                log.debug(
+                    "NO CANDIDATES | %s | %s | %s vs %s | subtype=%s — no Poly %s market for this team",
+                    km.sport, km.platform_id, km.team, km.opponent, km.sport_subtype, km.sport_subtype,
+                )
+                continue
 
             for pm in candidates:
                 if pm.platform_id in used_poly:
@@ -220,10 +230,12 @@ class MarketMatcher:
                 )
                 break
 
+        no_cand_str = ", ".join(f"{k}_no_poly={v}" for k, v in sorted(no_candidates.items()))
         log.info(
-            "Sports matching: %d × %d → %d pairs | rejections: %s",
+            "Sports matching: %d × %d → %d pairs | rejections: %s | no_candidates: %s",
             len(kalshi), len(poly), len(pairs),
             ", ".join(f"{k}={v}" for k, v in rejected.items()) or "none",
+            no_cand_str or "none",
         )
         return pairs
 
