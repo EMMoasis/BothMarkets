@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -85,13 +86,29 @@ def _load_env() -> None:
                     os.environ.setdefault(k, v)
 
 
+def _rotate_opps_log() -> None:
+    """
+    On startup: if opportunities.log exists, move it to old_logs/ with a
+    timestamped filename, then start a fresh empty file.
+    """
+    if not os.path.exists(OPPS_LOG_FILE):
+        return
+    old_logs_dir = os.path.join(os.path.dirname(os.path.abspath(OPPS_LOG_FILE)), "old_logs")
+    os.makedirs(old_logs_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    dest = os.path.join(old_logs_dir, f"opportunities_{ts}.log")
+    shutil.move(OPPS_LOG_FILE, dest)
+
+
 def _setup_logging() -> None:
+    _rotate_opps_log()
+
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
 
     main_handler = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
     main_handler.setFormatter(fmt)
 
-    opps_handler = logging.FileHandler(OPPS_LOG_FILE, mode="a", encoding="utf-8")
+    opps_handler = logging.FileHandler(OPPS_LOG_FILE, mode="w", encoding="utf-8")
     opps_handler.setFormatter(fmt)
     opps_handler.addFilter(_OppsFilter())
 
