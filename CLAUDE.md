@@ -5,7 +5,7 @@
 Scans Kalshi and Polymarket every 2 seconds for live prices on matched binary markets.
 Market lists are refreshed every 2 hours.
 Finds cross-platform arbitrage: same event on both platforms where combined YES+NO cost < 100c.
-Currently SCAN-ONLY — execution layer is in development.
+Execution layer is LIVE — runs with `--live` flag, paper trading with `--paper` flag.
 
 ## Arbitrage Logic
 
@@ -19,9 +19,20 @@ Both pay 100c if the event resolves either way — guaranteed profit when combin
 
 ### SPORTS (active)
 Esports and traditional sports game-winner markets:
-- CS2, LOL, VALORANT, DOTA2, NBA, NFL, NHL, MLB, SOCCER
 
-Kalshi tickers: KXCS2MAP-*, KXLOLMAP-*, KXVALORANTMAP-*, KXLOLGAME-*, KXCS2GAME-*, etc.
+**Esports:** CS2, LOL (League of Legends), VALORANT, DOTA2, Rocket League
+**US Sports:** NBA, WNBA, NFL, NHL, MLB
+**College Sports:** NCAAB, NCAAF
+**Soccer:** SOCCER (MLS, Premier League, Champions League, La Liga, Bundesliga, etc.)
+**Cricket:** CRICKET (IPL, ICC, BBL, PSL, CPL)
+**Tennis:** TENNIS (ATP, WTA, Wimbledon, Grand Slams)
+**Golf:** GOLF (PGA Tour, LIV Golf, Masters, Ryder Cup)
+**MMA / Combat:** MMA (UFC), BOXING
+**Rugby:** RUGBY (NRL, Super Rugby, Six Nations, Rugby League/Union)
+**Formula 1:** F1
+**Other:** CFL, AFL, TABLE_TENNIS, LACROSSE
+
+Kalshi tickers: KXCS2MAP-*, KXLOLMAP-*, KXVALORANTMAP-*, KXNBAWIN-*, KXCRICKET-*, KXIPL-*, KXTENNIS-*, KXATP-*, KXPGA-*, KXUFC-*, KXRUGBY-*, KXF1-*, etc.
 Polymarket slugs: moneyline (series winner) and child_moneyline (per-map/game winner)
 
 ### CRYPTO (disabled — see below)
@@ -137,7 +148,9 @@ Each Kalshi market and each Polymarket market appears in at most one matched pai
 
 ## Entry Point
 
-    python -m scanner.runner
+    python -m scanner.runner           # scan-only (no trades)
+    python -m scanner.runner --live    # live trading
+    python -m scanner.runner --paper   # paper trading (dry-run, logs trades but no real orders)
 
 ## API Endpoints
 
@@ -172,4 +185,4 @@ Each Kalshi market and each Polymarket market appears in at most one matched pai
   only way to distinguish them (date tolerance alone is insufficient).
 - Soccer/non-esports Polymarket markets may parse team names as "yes"/"no" if the question
   format doesn't match the sports regex. These fail to match Kalshi and are benign.
-- 188/188 tests passing (pytest tests/).
+- 327/327 tests passing (pytest tests/).
