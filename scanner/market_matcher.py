@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from scanner.config import CRYPTO_MATCHING_ENABLED, RESOLUTION_TIME_TOLERANCE_HOURS
+from scanner.config import CRYPTO_MATCHING_ENABLED, RESOLUTION_TIME_TOLERANCE_HOURS, RESOLUTION_TIME_TOLERANCE_HOURS_SPORTS
 from scanner.models import MarketType, MatchedPair, NormalizedMarket
 
 log = logging.getLogger(__name__)
@@ -286,7 +286,7 @@ def _check_sports_match(km: NormalizedMarket, pm: NormalizedMarket) -> str | Non
     if km.opponent and pm.opponent and km.opponent != pm.opponent:
         return "opponent"
     time_diff = abs((km.resolution_dt - pm.resolution_dt).total_seconds())
-    if time_diff > RESOLUTION_TIME_TOLERANCE_HOURS * 3600:
+    if time_diff > RESOLUTION_TIME_TOLERANCE_HOURS_SPORTS * 3600:
         return "date"
     if km.sport_subtype != pm.sport_subtype:
         return "subtype"

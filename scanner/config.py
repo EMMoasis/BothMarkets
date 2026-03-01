@@ -8,7 +8,13 @@ PRICE_POLL_SECONDS = 2          # 2 seconds: how often to fetch live prices and 
 SCAN_WINDOW_HOURS = 72          # Only include markets closing within this window
 
 # --- Market matching tolerance ---
-RESOLUTION_TIME_TOLERANCE_HOURS = 1   # Max difference between Kalshi and Poly close times
+# Crypto: keep tight (1h) because the oracle mismatch already makes crypto arb risky.
+# Sports: use 4h because esports BO3/BO5 series can run 4-6 hours and the two platforms
+#   often use different time references (Kalshi = scheduled start, Poly = expected end).
+#   A 4h window catches these without risking false cross-day matches (same team only
+#   plays one series per day in most tournaments, so opponent+sport_subtype still guards).
+RESOLUTION_TIME_TOLERANCE_HOURS = 1         # Crypto (disabled by default anyway)
+RESOLUTION_TIME_TOLERANCE_HOURS_SPORTS = 4  # Sports: accounts for match duration spread
 
 # --- Crypto matching ---
 # Disabled: Kalshi resolves via CF Benchmarks BRTI (60-sec multi-exchange average)

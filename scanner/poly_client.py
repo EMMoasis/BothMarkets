@@ -438,6 +438,92 @@ def _normalize_gamma_market(gm: dict[str, Any]) -> list[NormalizedMarket]:
     return []
 
 
+def _normalize_yes_no_sports_market(
+    gm: dict[str, Any],
+    condition_id: str,
+    question: str,
+    resolution_dt: datetime,
+    platform_url: str,
+    token_ids: list,
+    clob_prices: dict,
+) -> list[NormalizedMarket]:
+    """
+    Handle YES/NO sports moneylines like "Will Austin FC win on 2026-03-01?"
+
+    These single-team markets are common in soccer (MLS, Premier League, etc.)
+    Each game typically has 3 separate binary questions: home-win, away-win, draw.
+    We extract the winner team from the question text to allow Kalshi matching.
+
+    Draw markets ("Will X vs. Y end in a draw?") are skipped — no Kalshi equivalent.
+    """
+    import re as _re
+    # Skip draw/tie markets
+    q_lower = question.lower()
+    if any(kw in q_lower for kw in ("draw", "tie", "end in a")):
+        return []
+
+    # Extract winner team: "Will <TEAM> win..." or "<TEAM> wins..."
+    m = _re.match(r'will\s+(.+?)\s+win\b', question, _re.IGNORECASE)
+    if not m:
+        return []
+    team_raw = m.group(1).strip()
+    if not team_raw:
+        return []
+
+    team_norm = normalize_team_name(team_raw)
+    if not team_norm:
+        return []
+
+    # Detect sport
+    sport_code = _detect_sport_from_question(question)
+    if sport_code is None:
+        category = (gm.get("category") or gm.get("categories") or "").lower()
+        sport_code = _detect_sport_from_text(category)
+    if sport_code is None:
+        sport_code = _detect_sport_from_series_slug(_extract_series_slug(gm))
+    if sport_code is None:
+        sport_code = "SPORTS"
+
+    # Token setup: YES=team wins, NO=team does not win
+    yes_id = str(token_ids[0]) if token_ids else None
+    no_id  = str(token_ids[1]) if len(token_ids) > 1 else None
+    yes_ask, yes_bid, yes_ask_depth, yes_ask_levels = clob_prices.get(yes_id, (None, None, None, [])) if yes_id else (None, None, None, [])
+    no_ask, no_bid, no_ask_depth, no_ask_levels     = clob_prices.get(no_id,  (None, None, None, [])) if no_id  else (None, None, None, [])
+
+    synthetic_id = f"{condition_id}_{team_norm}"
+
+    return [NormalizedMarket(
+        platform=Platform.POLYMARKET,
+        platform_id=synthetic_id,
+        platform_url=platform_url,
+        raw_question=question,
+        market_type=MarketType.SPORTS,
+        asset=sport_code,
+        direction="WIN",
+        threshold=0.0,
+        team=team_norm,
+        opponent=None,        # Opponent unknown from single-team binary market
+        sport=sport_code,
+        sport_subtype="series",
+        event_id=condition_id,
+        map_number=None,
+        resolution_dt=resolution_dt,
+        yes_ask_cents=yes_ask,
+        no_ask_cents=no_ask,
+        yes_bid_cents=yes_bid,
+        no_bid_cents=no_bid,
+        yes_ask_depth=yes_ask_depth,
+        no_ask_depth=no_ask_depth,
+        yes_ask_levels=yes_ask_levels,
+        no_ask_levels=no_ask_levels,
+        yes_token_id=yes_id,
+        no_token_id=no_id,
+        liquidity_usd=float(gm.get("liquidity") or 0),
+        volume_usd=float(gm.get("volume") or 0),
+        raw_data=gm,
+    )]
+
+
 def _normalize_sports_market(
     gm: dict[str, Any],
     condition_id: str,
@@ -462,6 +548,14 @@ def _normalize_sports_market(
 
     if len(outcomes) < 2 or len(token_ids) < len(outcomes):
         return []
+
+    # If outcomes are YES/NO this is a single-team binary market ("Will X win on DD-MM?").
+    # Common for soccer leagues (MLS, Premier League, etc.) where each game has three
+    # separate markets: home-win (YES/NO), away-win (YES/NO), draw (YES/NO).
+    # We normalise these by extracting the winner team from the question text so they
+    # can match Kalshi's "Will X win the X vs. Y match?" markets.
+    if _is_yes_no_market(outcomes):
+        return _normalize_yes_no_sports_market(gm, condition_id, question, resolution_dt, platform_url, token_ids, clob_prices)
 
     # Detect sport — cascade through all available signals
     sport_code = _detect_sport_from_question(question)

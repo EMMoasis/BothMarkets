@@ -39,13 +39,28 @@ Polymarket slugs: moneyline (series winner) and child_moneyline (per-map/game wi
 BTC, ETH, SOL, XRP, DOGE price-level markets.
 Disabled by default due to oracle mismatch (see config.CRYPTO_MATCHING_ENABLED).
 
+## Active Kalshi Sports (as of March 2026)
+
+Kalshi currently only offers **esports** game-winner markets within a 72h window:
+- CS2 (KXCS2MAP, KXCS2GAME), LOL (KXLOLMAP, KXLOLGAME), VALORANT (KXVALORANTMAP, KXVALORANTGAME), DOTA2 (KXDOTA2GAME)
+
+Traditional sports NOT currently on Kalshi (within 72h): NBA, NHL, MLB, NFL, soccer, cricket, tennis.
+- IPL cricket markets exist (KXIPL) but with June 2026 resolution dates — outside 72h window
+- KXBOXING exists but typical fight dates are 4-5 days out (outside 72h)
+- KXNCAAF and KXF1 have championship markets far in the future (months away)
+
+Polymarket HAS NHL/NBA/NCAAB game-winner markets within 72h. No cross-platform match is possible
+until Kalshi lists equivalent near-term markets.
+
 ## Sports Market Matching — ALL 6 Must Pass
 
 1. **sport**       — same sport code (CS2, LOL, VALORANT, NBA, etc.)
 2. **team**        — same normalized team name (see normalize_team_name below)
 3. **opponent**    — same normalized opponent — prevents DRX vs TeamA matching DRX vs TeamB
                      when the same team plays multiple games in the 72h window
-4. **date**        — resolution_dt within ±1 hour (RESOLUTION_TIME_TOLERANCE_HOURS)
+4. **date**        — resolution_dt within ±4 hours (RESOLUTION_TIME_TOLERANCE_HOURS_SPORTS)
+                     4h tolerance because esports BO3/BO5 can run 4-6h; Kalshi uses
+                     scheduled start time, Polymarket uses expected end time — gap can be 3-5h
 5. **subtype**     — "map" (per-map/game winner) vs "series" (match/series winner)
                      prevents KXLOLMAP map-winner matching Polymarket series-winner
 6. **map_number**  — when both markets specify a game/map number (e.g. "map 2" vs "Game 3"),
@@ -186,3 +201,6 @@ Each Kalshi market and each Polymarket market appears in at most one matched pai
 - Soccer/non-esports Polymarket markets may parse team names as "yes"/"no" if the question
   format doesn't match the sports regex. These fail to match Kalshi and are benign.
 - 327/327 tests passing (pytest tests/).
+- Polymarket soccer "Will X win?" (YES/NO outcomes) are handled by `_normalize_yes_no_sports_market`:
+  extracts team name from question text, skips draw markets.
+- Date tolerance for sports is 4h (RESOLUTION_TIME_TOLERANCE_HOURS_SPORTS), separate from crypto (1h).
