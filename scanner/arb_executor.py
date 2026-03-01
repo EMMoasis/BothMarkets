@@ -250,11 +250,18 @@ class ArbExecutor:
             log.info("EXEC | Kalshi order status=%s fill_count=%d remaining=%d", order_status, filled, remaining)
 
             if filled < 1:
-                log.warning("EXEC | Kalshi order %s with 0 fills (status=%s) — aborting",
-                            k_order_id[:16], order_status)
-                self._set_cooldown(opp, EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES)
-                log.info("EXEC SKIP (kalshi_no_fill) | %s — cooling down %ds",
-                         km.platform_id, EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES * 2)
+                # Differentiate why there was no fill:
+                #   "resting"  → order entered the book but no match yet (stale price data).
+                #                Opportunity may still be live — retry quickly (1 cycle ≈ 2s).
+                #   "canceled" → Kalshi rejected/cancelled the order outright (empty book).
+                #                Give the book 30s to replenish before retrying.
+                was_resting = order_status == "resting"
+                cooldown = 1 if was_resting else EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES
+                log.warning("EXEC | Kalshi order %s with 0 fills (status=%s) — aborting, cooldown=%d cycles",
+                            k_order_id[:16], order_status, cooldown)
+                self._set_cooldown(opp, cooldown)
+                log.info("EXEC SKIP (kalshi_no_fill) | %s — cooling down ~%ds",
+                         km.platform_id, cooldown * 2)
                 return ExecutionResult(status="skipped", reason="kalshi_no_fill",
                                        kalshi_balance_before=k_bal,
                                        poly_balance_before=poly_bal)
