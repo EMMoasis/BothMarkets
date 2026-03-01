@@ -70,7 +70,7 @@ _SPORT_SERIES: dict[str, str] = {
     "KXDOTA2":    "DOTA2",
     "KXROCKETLEAGUE": "RL",
     "KXRL":       "RL",
-    # --- US Sports ---
+    # --- US Sports (WIN format — older series) ---
     "KXNBAWIN":   "NBA",
     "KXNBA":      "NBA",
     "KXWNBA":     "WNBA",
@@ -80,6 +80,15 @@ _SPORT_SERIES: dict[str, str] = {
     "KXNHL":      "NHL",
     "KXNFLWIN":   "NFL",
     "KXNFL":      "NFL",
+    # --- US Sports (GAME format — current series used by Kalshi) ---
+    # Series ticker is often null on these markets; ticker prefix is used as fallback.
+    "KXNBAGAME":  "NBA",
+    "KXNHLGAME":  "NHL",
+    "KXMLBGAME":  "MLB",
+    "KXNFLGAME":  "NFL",
+    "KXNCAABGAME": "NCAAB",
+    "KXWCBBGAME": "NCAAW",   # Women's college basketball
+    "KXWNBAGAME": "WNBA",
     # --- College Sports ---
     "KXNCAAB":    "NCAAB",
     "KXNCAAF":    "NCAAF",
@@ -145,12 +154,18 @@ _SERIES_URL_SLUG: dict[str, str] = {
     "KXDOTA2GAME":    "dota-2-game",
     "KXDOTA2MAP":     "dota-2-map-winner",
     "KXROCKETLEAGUE": "rocket-league-game",
-    # US Sports
+    # US Sports (WIN series — legacy)
     "KXNBAWIN":       "nba-game-winner",
     "KXNHLWIN":       "nhl-game-winner",
     "KXNFLWIN":       "nfl-game-winner",
     "KXMLBWIN":       "mlb-game-winner",
     "KXWNBA":         "wnba-game-winner",
+    # US Sports (GAME series — current Kalshi format)
+    "KXNBAGAME":      "professional-basketball-game",
+    "KXNHLGAME":      "professional-hockey-game",
+    "KXMLBGAME":      "major-league-baseball-game",
+    "KXNFLGAME":      "professional-football-game",
+    "KXNCAABGAME":    "college-basketball-game",
     # College Sports
     "KXNCAAB":        "ncaa-basketball-game-winner",
     "KXNCAAF":        "ncaa-football-game-winner",
@@ -456,13 +471,15 @@ def _normalize_sports(
     # Extract both teams from title to get opponent
     team_a, team_b = _extract_both_teams(title)
     if team_a and team_b:
-        # Figure out which is the opponent
-        team_norm = normalize_team_name(team_raw)
-        team_a_norm = normalize_team_name(team_a)
-        team_b_norm = normalize_team_name(team_b)
-        if team_norm == team_a_norm:
+        # Figure out which is the opponent.
+        # Use canonicalize so city ("Minnesota") matches extracted name ("Minnesota")
+        # and also handles edge cases where yes_sub_title uses an abbreviation.
+        team_cmp   = canonicalize_team_name(team_raw, sport)
+        team_a_cmp = canonicalize_team_name(team_a, sport)
+        team_b_cmp = canonicalize_team_name(team_b, sport)
+        if team_cmp == team_a_cmp:
             opponent_raw = team_b
-        elif team_norm == team_b_norm:
+        elif team_cmp == team_b_cmp:
             opponent_raw = team_a
         else:
             # Our team didn't match either — use whichever isn't our team by string
@@ -471,8 +488,8 @@ def _normalize_sports(
         # Can't extract opponent — skip (needed for matching)
         return None
 
-    team_norm = normalize_team_name(team_raw)
-    opponent_norm = normalize_team_name(opponent_raw)
+    team_norm = canonicalize_team_name(team_raw, sport)
+    opponent_norm = canonicalize_team_name(opponent_raw, sport)
 
     # Build the correct Kalshi page URL using series + event ticker
     platform_url = _kalshi_market_url(series_ticker, event_ticker) if series_ticker and event_ticker \
@@ -574,6 +591,9 @@ def _extract_both_teams(title: str) -> tuple[str | None, str | None]:
     # Pattern: "the <TEAM A> vs[.] <TEAM B>" optionally followed by sport/match words
     # We need to handle team names with spaces (e.g. "Team Vitality", "Cloud9")
     patterns = [
+        # "X at Y Winner?" or "X at Y Game?" — US professional sports (away at home)
+        # e.g. "Minnesota at Denver Winner?", "Golden State at Denver Winner?"
+        r'^(.+?)\s+at\s+(.+?)\s+(?:Winner|Game|Match)\b',
         # "the X vs. Y <sport/game/match>" — list all known sport keywords so the
         # non-greedy (.+?) stops at the right word boundary
         r'the\s+(.+?)\s+vs\.?\s+(.+?)\s+(?:'
@@ -633,6 +653,196 @@ def normalize_team_name(name: str) -> str:
     # Remove trailing numbers after space (e.g. "Cloud9 2" → "cloud9")
     s = re.sub(r"\s+\d+$", "", s).strip()
     return s
+
+
+# ------------------------------------------------------------------
+# Sport-specific team name aliases: city / abbreviated name → canonical nickname
+#
+# Many platforms use different representations for the same team:
+#   Kalshi  → city name   "Minnesota", "Golden State"
+#   Polymarket → nickname "Timberwolves", "Warriors"
+#
+# These dicts map every known alternative form (lower-cased, after normalize_team_name)
+# to the canonical lowercase nickname used by Polymarket.
+# Sports not listed here pass through unchanged (esports, tennis, etc.).
+# ------------------------------------------------------------------
+_SPORT_TEAM_ALIASES: dict[str, dict[str, str]] = {
+    "NBA": {
+        # City / state → nickname
+        "atlanta": "hawks",
+        "boston": "celtics",
+        "brooklyn": "nets",
+        "charlotte": "hornets",
+        "chicago": "bulls",
+        "cleveland": "cavaliers",
+        "dallas": "mavericks",
+        "denver": "nuggets",
+        "detroit": "pistons",
+        "golden state": "warriors",
+        "houston": "rockets",
+        "indiana": "pacers",
+        "memphis": "grizzlies",
+        "miami": "heat",
+        "milwaukee": "bucks",
+        "minnesota": "timberwolves",
+        "new orleans": "pelicans",
+        "new york": "knicks",
+        "oklahoma city": "thunder",
+        "oklahoma": "thunder",
+        "orlando": "magic",
+        "philadelphia": "76ers",
+        "phoenix": "suns",
+        "portland": "blazers",
+        "trail blazers": "blazers",
+        "sacramento": "kings",
+        "san antonio": "spurs",
+        "toronto": "raptors",
+        "utah": "jazz",
+        "washington": "wizards",
+        # Abbreviated ticker suffixes Kalshi sometimes uses
+        "min": "timberwolves",
+        "den": "nuggets",
+        "bos": "celtics",
+        "gsw": "warriors",
+        "okc": "thunder",
+        "por": "blazers",
+        "sac": "kings",
+        "sas": "spurs",
+        "tor": "raptors",
+        "was": "wizards",
+    },
+    "NHL": {
+        # City / state → nickname
+        "anaheim": "ducks",
+        "arizona": "coyotes",
+        "buffalo": "sabres",
+        "calgary": "flames",
+        "carolina": "hurricanes",
+        "colorado": "avalanche",
+        "columbus": "blue jackets",
+        "dallas": "stars",
+        "edmonton": "oilers",
+        "florida": "panthers",
+        "minnesota": "wild",
+        "montreal": "canadiens",
+        "nashville": "predators",
+        "new jersey": "devils",
+        "new york": "rangers",          # Ambiguous: also Islanders — keep Rangers as default
+        "ny rangers": "rangers",
+        "ny islanders": "islanders",
+        "ottawa": "senators",
+        "philadelphia": "flyers",
+        "pittsburgh": "penguins",
+        "san jose": "sharks",
+        "seattle": "kraken",
+        "st. louis": "blues",
+        "st louis": "blues",
+        "tampa bay": "lightning",
+        "toronto": "maple leafs",
+        "vancouver": "canucks",
+        "vegas": "golden knights",
+        "las vegas": "golden knights",
+        "washington": "capitals",
+        "winnipeg": "jets",
+        # Utah Hockey Club (new franchise since 2024)
+        "utah": "utah hc",
+    },
+    "MLB": {
+        "arizona": "diamondbacks",
+        "arizona diamondbacks": "diamondbacks",
+        "atlanta": "braves",
+        "baltimore": "orioles",
+        "boston": "red sox",
+        "chicago": "cubs",       # could also be White Sox
+        "chicago cubs": "cubs",
+        "chicago white sox": "white sox",
+        "cincinnati": "reds",
+        "cleveland": "guardians",
+        "colorado": "rockies",
+        "detroit": "tigers",
+        "houston": "astros",
+        "kansas city": "royals",
+        "los angeles": "dodgers",   # could also be Angels
+        "la dodgers": "dodgers",
+        "la angels": "angels",
+        "miami": "marlins",
+        "milwaukee": "brewers",
+        "minnesota": "twins",
+        "new york": "yankees",       # could also be Mets
+        "ny yankees": "yankees",
+        "ny mets": "mets",
+        "oakland": "athletics",
+        "athletics": "athletics",    # team moved but still nicknamed A's
+        "philadelphia": "phillies",
+        "pittsburgh": "pirates",
+        "san diego": "padres",
+        "san francisco": "giants",
+        "seattle": "mariners",
+        "st. louis": "cardinals",
+        "st louis": "cardinals",
+        "tampa bay": "rays",
+        "texas": "rangers",
+        "toronto": "blue jays",
+        "washington": "nationals",
+    },
+    "NFL": {
+        "arizona": "cardinals",
+        "atlanta": "falcons",
+        "baltimore": "ravens",
+        "buffalo": "bills",
+        "carolina": "panthers",
+        "chicago": "bears",
+        "cincinnati": "bengals",
+        "cleveland": "browns",
+        "dallas": "cowboys",
+        "denver": "broncos",
+        "detroit": "lions",
+        "green bay": "packers",
+        "houston": "texans",
+        "indianapolis": "colts",
+        "jacksonville": "jaguars",
+        "kansas city": "chiefs",
+        "las vegas": "raiders",
+        "los angeles": "rams",       # could also be Chargers
+        "la rams": "rams",
+        "la chargers": "chargers",
+        "miami": "dolphins",
+        "minnesota": "vikings",
+        "new england": "patriots",
+        "new orleans": "saints",
+        "new york": "giants",        # could also be Jets
+        "ny giants": "giants",
+        "ny jets": "jets",
+        "philadelphia": "eagles",
+        "pittsburgh": "steelers",
+        "san francisco": "49ers",
+        "seattle": "seahawks",
+        "tampa bay": "buccaneers",
+        "tennessee": "titans",
+        "washington": "commanders",
+    },
+}
+
+
+def canonicalize_team_name(name: str, sport: str) -> str:
+    """
+    Normalize a team name and apply sport-specific city/state → nickname alias.
+
+    Many platforms use different representations for the same team:
+      Kalshi     uses city names  → "Minnesota", "Golden State"
+      Polymarket uses nicknames   → "Timberwolves", "Warriors"
+
+    Steps:
+      1. normalize_team_name (lowercase, strip common words, remove punctuation)
+      2. Look up in sport-specific alias table → return canonical nickname if found
+      3. If not in table, return the normalized name as-is
+
+    For sports not in _SPORT_TEAM_ALIASES (esports, tennis, soccer, etc.)
+    the function is a no-op over normalize_team_name.
+    """
+    norm = normalize_team_name(name)
+    aliases = _SPORT_TEAM_ALIASES.get(sport, {})
+    return aliases.get(norm, norm)
 
 
 # ------------------------------------------------------------------

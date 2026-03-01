@@ -29,6 +29,7 @@ from scanner.config import (
 )
 from scanner.kalshi_client import (
     _extract_map_number,
+    canonicalize_team_name,
     extract_asset,
     extract_direction,
     extract_dollar_amount,
@@ -470,11 +471,7 @@ def _normalize_yes_no_sports_market(
     if not team_raw:
         return []
 
-    team_norm = normalize_team_name(team_raw)
-    if not team_norm:
-        return []
-
-    # Detect sport
+    # Detect sport first so we can use the sport-specific alias for the team name
     sport_code = _detect_sport_from_question(question)
     if sport_code is None:
         category = (gm.get("category") or gm.get("categories") or "").lower()
@@ -483,6 +480,11 @@ def _normalize_yes_no_sports_market(
         sport_code = _detect_sport_from_series_slug(_extract_series_slug(gm))
     if sport_code is None:
         sport_code = "SPORTS"
+
+    # Apply sport-specific alias (e.g. city → nickname)
+    team_norm = canonicalize_team_name(team_raw, sport_code)
+    if not team_norm:
+        return []
 
     # Token setup: YES=team wins, NO=team does not win
     yes_id = str(token_ids[0]) if token_ids else None
@@ -590,8 +592,8 @@ def _normalize_sports_market(
             # For 3+ outcomes we can't trivially infer opponent
             continue
 
-        team_norm = normalize_team_name(team_raw)
-        opp_norm = normalize_team_name(opp_raw)
+        team_norm = canonicalize_team_name(team_raw, sport_code)
+        opp_norm  = canonicalize_team_name(opp_raw, sport_code)
 
         # Prices, depth, and full ask levels at best ask
         yes_ask, yes_bid, yes_ask_depth, yes_ask_levels = clob_prices.get(team_token_id, (None, None, None, []))
