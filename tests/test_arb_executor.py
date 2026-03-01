@@ -91,8 +91,10 @@ def _make_executor(max_trade_usd: float = 5.0) -> tuple[ArbExecutor, MagicMock, 
     p_trader.get_usdc_balance.return_value = 100.0
     # Default: Kalshi balance for reconciliation
     k_trader.get_balance.return_value = 500.0
-    # Default: Kalshi order fully filled (remaining_count=0)
-    k_trader.get_order.return_value = {"order": {"remaining_count": 0}}
+    # Default: Kalshi order fully filled.
+    # fill_count=5 matches the default 5-unit trade (k=55c p=40c max=$5).
+    # Tests needing different fill counts override get_order explicitly.
+    k_trader.get_order.return_value = {"order": {"status": "filled", "fill_count": 5, "remaining_count": 0}}
     # Default: Poly FOK order fully filled (get_actual_fill returns requested size)
     # Individual tests override this to simulate 0-fill or partial-fill scenarios.
     p_trader.get_actual_fill.side_effect = lambda order_id, estimated: estimated
@@ -484,7 +486,8 @@ class TestPartialKalshiFill:
         opp = _make_opportunity(k_cost=55.0, p_cost=40.0)
 
         k_trader.place_order.return_value = {"order": {"order_id": "k-partial"}}
-        k_trader.get_order.return_value = {"order": {"remaining_count": 2}}
+        # fill_count=3 (actual fills), remaining_count=2 (still resting)
+        k_trader.get_order.return_value = {"order": {"status": "resting", "fill_count": 3, "remaining_count": 2}}
         p_trader.place_order.return_value = {"orderID": "p-1"}
 
         result = executor.execute(opp)
@@ -500,7 +503,8 @@ class TestPartialKalshiFill:
         opp = _make_opportunity()
 
         k_trader.place_order.return_value = {"order": {"order_id": "k-partial"}}
-        k_trader.get_order.return_value = {"order": {"remaining_count": 1}}
+        # fill_count=4, remaining_count=1 — partial fill with resting order
+        k_trader.get_order.return_value = {"order": {"status": "resting", "fill_count": 4, "remaining_count": 1}}
         p_trader.place_order.return_value = {"orderID": "p-1"}
 
         executor.execute(opp)
@@ -508,12 +512,13 @@ class TestPartialKalshiFill:
         k_trader.cancel_order.assert_called_once_with("k-partial")
 
     def test_zero_fill_returns_skipped(self):
-        """If Kalshi fills 0 contracts, skip without placing Poly order."""
+        """If Kalshi fills 0 contracts (order cancelled), skip without placing Poly order."""
         executor, k_trader, p_trader = _make_executor(max_trade_usd=5.0)
         opp = _make_opportunity(k_cost=55.0, p_cost=40.0)
 
         k_trader.place_order.return_value = {"order": {"order_id": "k-zero"}}
-        k_trader.get_order.return_value = {"order": {"remaining_count": 5}}
+        # status=canceled, fill_count=0 — this is the real Kalshi 0-fill scenario
+        k_trader.get_order.return_value = {"order": {"status": "canceled", "fill_count": 0, "remaining_count": 5}}
         p_trader.place_order.return_value = {"orderID": "p-1"}
 
         result = executor.execute(opp)
@@ -528,7 +533,7 @@ class TestPartialKalshiFill:
         opp = _make_opportunity()
 
         k_trader.place_order.return_value = {"order": {"order_id": "k-full"}}
-        k_trader.get_order.return_value = {"order": {"remaining_count": 0}}
+        k_trader.get_order.return_value = {"order": {"status": "filled", "fill_count": 5, "remaining_count": 0}}
         p_trader.place_order.return_value = {"orderID": "p-1"}
 
         executor.execute(opp)

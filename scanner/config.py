@@ -75,6 +75,11 @@ SKIP_UNVERIFIED_MATCHES: bool = True    # True = skip pair | False = allow with 
 EXEC_MAX_TRADE_USD: float = 50.0
 # Hard cap on units per single map market (prevents over-investment on thin markets).
 EXEC_MAX_UNITS_PER_MAP: int = 300
+# Maximum total units (contracts) the scanner may accumulate on any single Kalshi
+# market across ALL trades in a session.  Once this threshold is hit the pair is
+# put on a long cooldown so the scanner stops hammering a thin book.
+# At ~52 units per trade this is roughly 6 trades max per market.
+EXEC_MAX_UNITS_PER_MARKET: int = 300
 # Minimum per Polymarket leg in USD (Polymarket rejects orders below ~$1)
 EXEC_POLY_MIN_ORDER_USD: float = 1.0
 # Cycles to wait before re-executing on the same pair (1 cycle ≈ 2 seconds)

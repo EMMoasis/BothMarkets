@@ -33,6 +33,7 @@ from scanner.config import (
     EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES,
     EXEC_MAX_TRADE_USD,
     EXEC_MAX_UNITS_PER_MAP,
+    EXEC_MAX_UNITS_PER_MARKET,
     EXEC_POLY_MIN_ORDER_USD,
     EXEC_UNWIND_DELAY_SECONDS,
     MIN_SPREAD_CENTS,
@@ -95,6 +96,9 @@ class ArbExecutor:
         # {(kalshi_ticker, poly_platform_id): cycle_number_until_ready}
         self._cooldowns: dict[tuple[str, str], int] = {}
         self._cycle = 0
+        # {kalshi_ticker: total_units_filled_this_session}
+        # Tracks cumulative units on each market to enforce per-market cap.
+        self._market_units: dict[str, int] = {}
 
     def tick(self) -> None:
         """Advance the internal cycle counter. Call once per price poll cycle."""
@@ -148,6 +152,19 @@ class ArbExecutor:
 
         log.info("EXEC | Balances before: Kalshi=$%.2f  Poly=$%.2f",
                  k_bal if k_bal is not None else -1, poly_bal)
+
+        # Per-market cap: refuse to trade if we've already accumulated too many units
+        market_units_so_far = self._market_units.get(km.platform_id, 0)
+        if market_units_so_far >= EXEC_MAX_UNITS_PER_MARKET:
+            log.info(
+                "EXEC SKIP | %s | per-market cap reached (%d/%d units) — pausing this market",
+                km.platform_id, market_units_so_far, EXEC_MAX_UNITS_PER_MARKET,
+            )
+            # Long cooldown so scanner stops hammering this pair
+            self._set_cooldown(opp, EXEC_COOLDOWN_CYCLES * 30)
+            return ExecutionResult(status="skipped", reason="market_cap_reached",
+                                   kalshi_balance_before=k_bal,
+                                   poly_balance_before=poly_bal)
 
         if poly_bal < EXEC_POLY_MIN_ORDER_USD:
             log.warning(
@@ -209,24 +226,32 @@ class ArbExecutor:
             self._set_cooldown(opp, EXEC_COOLDOWN_CYCLES * 6 if is_conflict else 1)
             return ExecutionResult(status="skipped", reason="kalshi_conflict" if is_conflict else "kalshi_leg_failed")
 
-        # Small pause then verify actual Kalshi fill (partial fills leave remainder resting)
+        # Small pause then verify actual Kalshi fill.
+        # IMPORTANT: remaining_count=0 does NOT mean filled — it also equals 0 for
+        # cancelled orders.  Always check the explicit `fill_count` field and the
+        # order `status`.  A status of "canceled" with fill_count=0 is a 0-fill.
         time.sleep(0.5)
         try:
             k_order_info = self._kalshi.get_order(k_order_id)
             order_data = k_order_info.get("order", {})
+            order_status = (order_data.get("status") or "").lower()
+            # fill_count is the authoritative field for how many contracts were filled
+            filled = int(order_data.get("fill_count") or 0)
             remaining = int(order_data.get("remaining_count") or 0)
-            filled = units - remaining
-            if remaining > 0:
-                # Cancel the unfilled resting portion so it doesn't fill later unhedged
+
+            if remaining > 0 and order_status not in ("canceled", "cancelled"):
+                # Partial fill: cancel the resting portion so it doesn't fill later unhedged
                 try:
                     self._kalshi.cancel_order(k_order_id)
                     log.info("EXEC | Kalshi partial fill %d/%d — cancelled resting %d", filled, units, remaining)
                 except Exception as ce:
                     log.warning("EXEC | Could not cancel resting Kalshi remainder: %s", ce)
+
+            log.info("EXEC | Kalshi order status=%s fill_count=%d remaining=%d", order_status, filled, remaining)
+
             if filled < 1:
-                log.warning("EXEC | Kalshi order placed but 0 contracts filled — aborting")
-                # Apply cooldown so we don't hammer the same market every 2s.
-                # Without this, the scanner retries on every cycle until the book changes.
+                log.warning("EXEC | Kalshi order %s with 0 fills (status=%s) — aborting",
+                            k_order_id[:16], order_status)
                 self._set_cooldown(opp, EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES)
                 log.info("EXEC SKIP (kalshi_no_fill) | %s — cooling down %ds",
                          km.platform_id, EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES * 2)
@@ -333,6 +358,11 @@ class ArbExecutor:
             expected_k_delta=-k_cost,
             expected_p_delta=-p_cost,
         )
+
+        # Update per-market unit counter
+        self._market_units[km.platform_id] = self._market_units.get(km.platform_id, 0) + units
+        log.info("EXEC | Market %s cumulative units this session: %d/%d",
+                 km.platform_id, self._market_units[km.platform_id], EXEC_MAX_UNITS_PER_MARKET)
 
         self._set_cooldown(opp, EXEC_COOLDOWN_CYCLES)
         return ExecutionResult(
