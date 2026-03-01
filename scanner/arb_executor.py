@@ -137,6 +137,19 @@ class ArbExecutor:
         if not poly_token_id:
             return ExecutionResult(status="error", reason="missing_poly_token_id")
 
+        # Per-market cap check BEFORE balance fetch — no point hitting the API
+        # if we've already maxed out this market for the session.
+        # The _market_units counter never resets within a session, so once the cap
+        # is hit this check will always reject.  A 30s cooldown keeps log noise low.
+        market_units_so_far = self._market_units.get(km.platform_id, 0)
+        if market_units_so_far >= EXEC_MAX_UNITS_PER_MARKET:
+            log.info(
+                "EXEC SKIP | %s | per-market cap reached (%d/%d units) — pausing this market",
+                km.platform_id, market_units_so_far, EXEC_MAX_UNITS_PER_MARKET,
+            )
+            self._set_cooldown(opp, EXEC_KALSHI_NO_FILL_COOLDOWN_CYCLES)  # ~30s
+            return ExecutionResult(status="skipped", reason="market_cap_reached")
+
         # Fetch both balances before trade for guard check and reconciliation
         try:
             poly_bal = self._poly.get_usdc_balance()
@@ -152,19 +165,6 @@ class ArbExecutor:
 
         log.info("EXEC | Balances before: Kalshi=$%.2f  Poly=$%.2f",
                  k_bal if k_bal is not None else -1, poly_bal)
-
-        # Per-market cap: refuse to trade if we've already accumulated too many units
-        market_units_so_far = self._market_units.get(km.platform_id, 0)
-        if market_units_so_far >= EXEC_MAX_UNITS_PER_MARKET:
-            log.info(
-                "EXEC SKIP | %s | per-market cap reached (%d/%d units) — pausing this market",
-                km.platform_id, market_units_so_far, EXEC_MAX_UNITS_PER_MARKET,
-            )
-            # Long cooldown so scanner stops hammering this pair
-            self._set_cooldown(opp, EXEC_COOLDOWN_CYCLES * 30)
-            return ExecutionResult(status="skipped", reason="market_cap_reached",
-                                   kalshi_balance_before=k_bal,
-                                   poly_balance_before=poly_bal)
 
         if poly_bal < EXEC_POLY_MIN_ORDER_USD:
             log.warning(
