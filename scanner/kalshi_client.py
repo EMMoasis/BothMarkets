@@ -56,18 +56,10 @@ _BELOW_WORDS = {"below", "under", "less", "lower", "beneath", "fall", "falls",
 # e.g. KXCS2GAME → CS2, KXNBAWIN → NBA, KXNHLWIN → NHL
 # ---------------------------------------------------------------------------
 _SPORT_SERIES: dict[str, str] = {
+    # --- Esports ---
     "KXCS2GAME":  "CS2",
     "KXCS2MAP":   "CS2",
     "KXCS2":      "CS2",
-    "KXNBAWIN":   "NBA",
-    "KXNBA":      "NBA",
-    "KXMLBWIN":   "MLB",
-    "KXMLB":      "MLB",
-    "KXNHLWIN":   "NHL",
-    "KXNHL":      "NHL",
-    "KXNFLWIN":   "NFL",
-    "KXNFL":      "NFL",
-    "KXSOCCER":   "SOCCER",
     "KXLOLGAME":  "LOL",
     "KXLOLMAP":   "LOL",
     "KXLOLWIN":   "LOL",
@@ -78,26 +70,110 @@ _SPORT_SERIES: dict[str, str] = {
     "KXDOTA2":    "DOTA2",
     "KXROCKETLEAGUE": "RL",
     "KXRL":       "RL",
+    # --- US Sports ---
+    "KXNBAWIN":   "NBA",
+    "KXNBA":      "NBA",
+    "KXWNBA":     "WNBA",
+    "KXMLBWIN":   "MLB",
+    "KXMLB":      "MLB",
+    "KXNHLWIN":   "NHL",
+    "KXNHL":      "NHL",
+    "KXNFLWIN":   "NFL",
+    "KXNFL":      "NFL",
+    # --- College Sports ---
+    "KXNCAAB":    "NCAAB",
+    "KXNCAAF":    "NCAAF",
+    "KXNCAA":     "NCAAB",   # generic prefix fallback
+    "KXCFB":      "NCAAF",
+    # --- Soccer / Football ---
+    "KXSOCCER":   "SOCCER",
+    "KXMLS":      "SOCCER",
+    "KXPREMIER":  "SOCCER",
+    "KXCHAMPIONS": "SOCCER",
+    "KXWORLDCUP": "SOCCER",
+    "KXEURO":     "SOCCER",
+    # --- Cricket ---
+    "KXCRICKET":  "CRICKET",
+    "KXIPL":      "CRICKET",   # Indian Premier League
+    "KXICC":      "CRICKET",   # ICC events (World Cup, Champions Trophy)
+    "KXBBL":      "CRICKET",   # Big Bash League
+    "KXPSL":      "CRICKET",   # Pakistan Super League
+    "KXCPL":      "CRICKET",   # Caribbean Premier League
+    # --- Tennis ---
+    "KXTENNIS":   "TENNIS",
+    "KXATP":      "TENNIS",
+    "KXWTA":      "TENNIS",
+    # --- Golf ---
+    "KXPGA":      "GOLF",
+    "KXGOLF":     "GOLF",
+    "KXLIV":      "GOLF",       # LIV Golf
+    "KXMASTERS":  "GOLF",
+    "KXDPWORLD":  "GOLF",       # DP World Tour
+    # --- MMA / Martial Arts ---
+    "KXUFC":      "MMA",
+    "KXMMA":      "MMA",
+    "KXBOXING":   "BOXING",
+    # --- Rugby ---
+    "KXRUGBY":    "RUGBY",
+    "KXNRL":      "RUGBY",      # National Rugby League (Australia)
+    "KXSUPER":    "RUGBY",      # Super Rugby
+    "KXRUGBYUNION": "RUGBY",
+    "KXRUGBYLEAGUE": "RUGBY",
+    "KXSIXNATIONS": "RUGBY",
+    # --- Formula 1 ---
+    "KXF1":       "F1",
+    "KXFORMULA":  "F1",
+    # --- Other ---
+    "KXCFL":      "CFL",        # Canadian Football League
+    "KXAFL":      "AFL",        # Australian Football League
+    "KXTABLETENNIS": "TABLE_TENNIS",
+    "KXLACROSSE": "LACROSSE",
 }
 
 # Maps series ticker → (series_slug) used to build the Kalshi market page URL.
 # URL format: https://kalshi.com/markets/{series_lower}/{series_slug}/{event_lower}
 # Series slugs come from the series title, lowercased with spaces→hyphens.
 _SERIES_URL_SLUG: dict[str, str] = {
-    "KXCS2GAME":     "counter-strike-2-game",
-    "KXCS2MAP":      "counter-strike-2-map-winner",
+    # Esports
+    "KXCS2GAME":      "counter-strike-2-game",
+    "KXCS2MAP":       "counter-strike-2-map-winner",
     "KXCS2TOTALMAPS": "counter-strike-2-total-maps",
-    "KXLOLGAME":     "league-of-legends-game",
-    "KXLOLMAP":      "league-of-legends-map-winner",
-    "KXVALORANTMAP": "valorant-map-winner",
+    "KXLOLGAME":      "league-of-legends-game",
+    "KXLOLMAP":       "league-of-legends-map-winner",
+    "KXVALORANTMAP":  "valorant-map-winner",
     "KXVALORANTGAME": "valorant-game",
-    "KXDOTA2GAME":   "dota-2-game",
-    "KXDOTA2MAP":    "dota-2-map-winner",
-    "KXNBAWIN":      "nba-game-winner",
-    "KXNHLWIN":      "nhl-game-winner",
-    "KXNFLWIN":      "nfl-game-winner",
-    "KXMLBWIN":      "mlb-game-winner",
+    "KXDOTA2GAME":    "dota-2-game",
+    "KXDOTA2MAP":     "dota-2-map-winner",
     "KXROCKETLEAGUE": "rocket-league-game",
+    # US Sports
+    "KXNBAWIN":       "nba-game-winner",
+    "KXNHLWIN":       "nhl-game-winner",
+    "KXNFLWIN":       "nfl-game-winner",
+    "KXMLBWIN":       "mlb-game-winner",
+    "KXWNBA":         "wnba-game-winner",
+    # College Sports
+    "KXNCAAB":        "ncaa-basketball-game-winner",
+    "KXNCAAF":        "ncaa-football-game-winner",
+    # Cricket
+    "KXCRICKET":      "cricket-match-winner",
+    "KXIPL":          "ipl-match-winner",
+    "KXICC":          "icc-match-winner",
+    # Tennis
+    "KXTENNIS":       "tennis-match-winner",
+    "KXATP":          "atp-match-winner",
+    "KXWTA":          "wta-match-winner",
+    # Golf
+    "KXPGA":          "pga-tour",
+    "KXGOLF":         "golf",
+    "KXMASTERS":      "masters",
+    # MMA / Boxing
+    "KXUFC":          "ufc",
+    "KXBOXING":       "boxing",
+    # Rugby
+    "KXRUGBY":        "rugby",
+    "KXNRL":          "nrl-match-winner",
+    # Formula 1
+    "KXF1":           "formula-1",
 }
 
 # Series prefixes that represent individual map/game winner markets (not full series winner)
@@ -498,9 +574,15 @@ def _extract_both_teams(title: str) -> tuple[str | None, str | None]:
     # Pattern: "the <TEAM A> vs[.] <TEAM B>" optionally followed by sport/match words
     # We need to handle team names with spaces (e.g. "Team Vitality", "Cloud9")
     patterns = [
-        # "the X vs. Y CS2 match" or "the X vs. Y match"
-        r'the\s+(.+?)\s+vs\.?\s+(.+?)\s+(?:cs2|nba|nfl|nhl|mlb|lol|valorant|dota|rocket\s*league|soccer|game|match|series)',
-        # "the X vs. Y" at end
+        # "the X vs. Y <sport/game/match>" — list all known sport keywords so the
+        # non-greedy (.+?) stops at the right word boundary
+        r'the\s+(.+?)\s+vs\.?\s+(.+?)\s+(?:'
+        r'cs2|nba|nfl|nhl|mlb|lol|valorant|dota|rocket\s*league|soccer|football|basketball|hockey|baseball|'
+        r'cricket|ipl|t20|odi|tennis|atp|wta|golf|pga|'
+        r'ufc|mma|boxing|rugby|nrl|f1|formula|ncaa|ncaab|ncaaf|wnba|cfl|afl|'
+        r'game|match|series|bout|fight'
+        r')',
+        # "the X vs. Y" at end of string / before "?"
         r'the\s+(.+?)\s+vs\.?\s+(.+?)(?:\s*\?|$)',
     ]
     for pat in patterns:

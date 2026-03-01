@@ -47,30 +47,127 @@ _SPORTS_MARKET_TYPES = {"moneyline"}
 
 # Category/tag words that indicate sports markets when sportsMarketType is absent
 _SPORTS_CATEGORY_WORDS = {
-    "cs2", "counter-strike", "nba", "nfl", "nhl", "mlb", "soccer", "football",
-    "basketball", "hockey", "baseball", "esports", "valorant", "lol", "league of legends",
+    # Esports
+    "cs2", "counter-strike", "esports", "valorant", "lol", "league of legends",
     "dota", "rocket league",
+    # US Sports
+    "nba", "nfl", "nhl", "mlb", "wnba",
+    "basketball", "hockey", "baseball",
+    "ncaa", "ncaab", "ncaaf", "college basketball", "college football",
+    # Global Football / Soccer
+    "soccer", "football",
+    # Cricket
+    "cricket", "ipl", "t20", "odi", "big bash", "bbl", "psl",
+    # Tennis
+    "tennis", "atp", "wta", "wimbledon", "grand slam",
+    # Golf
+    "golf", "pga", "pga tour", "masters", "liv golf", "ryder cup", "open championship",
+    # MMA / Combat Sports
+    "ufc", "mma", "mixed martial arts", "boxing",
+    # Rugby
+    "rugby", "nrl", "super rugby", "rugby league", "rugby union", "six nations",
+    # Formula 1
+    "formula 1", "formula one", "f1", "grand prix", "formula1",
+    # Other
+    "cfl", "afl", "australian football", "table tennis",
 }
 
 # Map sport category keyword → sport code
+# Longer/more-specific keywords must come first so the sort-by-length in
+# _detect_sport_from_text matches them before shorter substrings.
 _POLY_SPORT_MAP: dict[str, str] = {
-    "cs2": "CS2",
+    # Esports
     "counter-strike": "CS2",
     "counter strike": "CS2",
+    "cs2": "CS2",
+    "league of legends": "LOL",
+    "lol": "LOL",
+    "rocket league": "RL",
+    "valorant": "VALORANT",
+    "dota": "DOTA2",
+    # US Sports
     "nba": "NBA",
+    "wnba": "WNBA",
     "nfl": "NFL",
     "nhl": "NHL",
     "mlb": "MLB",
-    "valorant": "VALORANT",
-    "lol": "LOL",
-    "league of legends": "LOL",
-    "dota": "DOTA2",
-    "rocket league": "RL",
-    "soccer": "SOCCER",
-    "football": "SOCCER",
     "basketball": "NBA",
     "hockey": "NHL",
     "baseball": "MLB",
+    # College Sports
+    "ncaa basketball": "NCAAB",
+    "college basketball": "NCAAB",
+    "march madness": "NCAAB",
+    "ncaab": "NCAAB",
+    "ncaa football": "NCAAF",
+    "college football": "NCAAF",
+    "ncaaf": "NCAAF",
+    "cfb": "NCAAF",
+    "ncaa": "NCAAB",            # generic fallback → basketball (most common)
+    # Soccer / Football
+    "soccer": "SOCCER",
+    "football": "SOCCER",
+    "premier league": "SOCCER",
+    "champions league": "SOCCER",
+    "mls": "SOCCER",
+    "la liga": "SOCCER",
+    "bundesliga": "SOCCER",
+    "serie a": "SOCCER",
+    "ligue 1": "SOCCER",
+    # Cricket
+    "big bash": "CRICKET",
+    "indian premier league": "CRICKET",
+    "cricket world cup": "CRICKET",
+    "ipl": "CRICKET",
+    "bbl": "CRICKET",
+    "psl": "CRICKET",
+    "t20": "CRICKET",
+    "odi": "CRICKET",
+    "cricket": "CRICKET",
+    # Tennis
+    "australian open": "TENNIS",
+    "french open": "TENNIS",
+    "roland garros": "TENNIS",
+    "us open tennis": "TENNIS",
+    "wimbledon": "TENNIS",
+    "grand slam": "TENNIS",
+    "atp": "TENNIS",
+    "wta": "TENNIS",
+    "tennis": "TENNIS",
+    # Golf
+    "pga tour": "GOLF",
+    "liv golf": "GOLF",
+    "ryder cup": "GOLF",
+    "open championship": "GOLF",
+    "masters": "GOLF",
+    "pga": "GOLF",
+    "golf": "GOLF",
+    # MMA / Combat Sports
+    "mixed martial arts": "MMA",
+    "ufc": "MMA",
+    "mma": "MMA",
+    "boxing": "BOXING",
+    # Rugby
+    "rugby league": "RUGBY",
+    "rugby union": "RUGBY",
+    "six nations": "RUGBY",
+    "super rugby": "RUGBY",
+    "nrl": "RUGBY",
+    "rugby": "RUGBY",
+    # Formula 1
+    "formula one": "F1",
+    "formula 1": "F1",
+    "formula1": "F1",
+    "grand prix": "F1",
+    "f1": "F1",
+    # Other
+    "canadian football": "CFL",
+    "cfl": "CFL",
+    "australian football": "AFL",
+    "aussie rules": "AFL",
+    "afl": "AFL",
+    "table tennis": "TABLE_TENNIS",
+    "lacrosse": "LACROSSE",
 }
 
 
