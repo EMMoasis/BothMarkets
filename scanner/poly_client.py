@@ -415,12 +415,15 @@ def _normalize_gamma_market(gm: dict[str, Any]) -> list[NormalizedMarket]:
     if sports_type in _SPORTS_MARKET_TYPES:
         return _normalize_sports_market(gm, condition_id, question, resolution_dt, platform_url, sports_type)
 
-    # Check category/tags for sports fallback
+    # Check category/tags/series-slug for sports fallback
     sport_code = _detect_sport_from_question(question)
     if sport_code is None:
         # Try category field
         category = (gm.get("category") or gm.get("categories") or "").lower()
         sport_code = _detect_sport_from_text(category)
+    if sport_code is None:
+        # Try series slug (works for "Mavericks vs. Hornets" → seriesSlug="nba-2026")
+        sport_code = _detect_sport_from_series_slug(_extract_series_slug(gm))
 
     if sport_code:
         # Has multiple non-YES/NO outcomes? Treat as sports moneyline
@@ -460,11 +463,15 @@ def _normalize_sports_market(
     if len(outcomes) < 2 or len(token_ids) < len(outcomes):
         return []
 
-    # Detect sport
+    # Detect sport — cascade through all available signals
     sport_code = _detect_sport_from_question(question)
     if sport_code is None:
         category = (gm.get("category") or gm.get("categories") or "").lower()
         sport_code = _detect_sport_from_text(category)
+    if sport_code is None:
+        # Series slug is the most reliable source when question/category have no keyword.
+        # e.g. "Mavericks vs. Hornets" has no "nba" keyword, but seriesSlug="nba-2026".
+        sport_code = _detect_sport_from_series_slug(_extract_series_slug(gm))
     if sport_code is None:
         sport_code = "SPORTS"  # Generic fallback
 
@@ -644,6 +651,34 @@ def _is_yes_no_market(outcomes: list) -> bool:
     return lower == {"yes", "no"}
 
 
+def _extract_series_slug(gm: dict[str, Any]) -> str:
+    """
+    Extract the Polymarket series slug from the embedded events array.
+
+    The series slug (e.g. "nba-2026", "international-cricket", "atp") is the most
+    reliable sport identifier for moneyline markets whose question text has no sport
+    keyword (e.g. "Mavericks vs. Hornets").
+
+    Lookup order:
+      1. events[0].seriesSlug   (direct shortcut added by Gamma)
+      2. events[0].series[0].slug  (full series object)
+      3. events[0].ticker  (event ticker — often has sport prefix)
+    """
+    events = gm.get("events") or []
+    if not events:
+        return ""
+    ev = events[0]
+    slug = ev.get("seriesSlug") or ""
+    if slug:
+        return slug
+    series = ev.get("series") or []
+    if series:
+        slug = series[0].get("slug") or ""
+    if slug:
+        return slug
+    return ev.get("ticker") or ""
+
+
 def _detect_sport_from_question(question: str) -> str | None:
     """Detect sport code from a market question string."""
     return _detect_sport_from_text(question)
@@ -656,6 +691,19 @@ def _detect_sport_from_text(text: str) -> str | None:
         if keyword in t:
             return code
     return None
+
+
+def _detect_sport_from_series_slug(series_slug: str) -> str | None:
+    """
+    Detect sport code from a Polymarket series slug.
+
+    Series slugs use hyphens as word separators (e.g. "nba-2026", "la-liga-2025",
+    "international-cricket"). Replace hyphens with spaces and run through the
+    standard sport keyword map.
+    """
+    if not series_slug:
+        return None
+    return _detect_sport_from_text(series_slug.replace("-", " "))
 
 
 def _fetch_book(http: httpx.Client, token_id: str) -> tuple[float | None, float | None, float | None]:
