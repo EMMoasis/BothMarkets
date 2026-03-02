@@ -333,19 +333,45 @@ class KalshiClient:
         """
         Paginate GET /markets until no more cursor.
         Respects Basic-tier rate limit (20 req/sec) with 60ms sleep between pages.
+        Each page is retried up to 3 times with a fresh connection on transient errors
+        (Kalshi resets persistent connections after ~N requests).
         """
         all_markets: list[dict[str, Any]] = []
         cursor: str | None = None
+        page_num = 0
 
         while True:
             params: dict[str, Any] = {"status": "open", "limit": KALSHI_PAGE_LIMIT}
             if cursor:
                 params["cursor"] = cursor
 
-            resp = self._http.get(f"{KALSHI_BASE_URL}/markets", params=params)
-            resp.raise_for_status()
-            data = resp.json()
+            # Retry individual page on connection-level errors
+            last_exc: Exception | None = None
+            for attempt in range(3):
+                try:
+                    resp = self._http.get(f"{KALSHI_BASE_URL}/markets", params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    last_exc = None
+                    break
+                except (httpx.ReadError, httpx.ConnectError, httpx.ReadTimeout) as exc:
+                    last_exc = exc
+                    log.debug(
+                        "Kalshi page %d attempt %d failed (%s) — retrying in 2s",
+                        page_num, attempt + 1, exc,
+                    )
+                    # Recreate the client to get a fresh TCP connection
+                    self._http = httpx.Client(
+                        timeout=HTTP_TIMEOUT,
+                        headers={"Accept": "application/json"},
+                        follow_redirects=True,
+                    )
+                    time.sleep(2.0)
 
+            if last_exc is not None:
+                raise last_exc
+
+            page_num += 1
             page = data.get("markets", [])
             all_markets.extend(page)
 
