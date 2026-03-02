@@ -32,7 +32,11 @@ Esports and traditional sports game-winner markets:
 **Formula 1:** F1
 **Other:** CFL, AFL, TABLE_TENNIS, LACROSSE
 
-Kalshi tickers: KXCS2MAP-*, KXLOLMAP-*, KXVALORANTMAP-*, KXNBAWIN-*, KXCRICKET-*, KXIPL-*, KXTENNIS-*, KXATP-*, KXPGA-*, KXUFC-*, KXRUGBY-*, KXF1-*, etc.
+Kalshi tickers:
+- Esports: KXCS2MAP-*, KXCS2GAME-*, KXLOLMAP-*, KXLOLGAME-*, KXVALORANTMAP-*, KXVALORANTGAME-*, KXDOTA2GAME-*, KXRLGAME-*
+- US Sports (GAME format): KXNBAGAME-*, KXNHLGAME-*, KXMLBGAME-*, KXNFLGAME-*, KXNCAABGAME-*, KXWNBAGAME-*, KXWCBBGAME-*
+- Other: KXCRICKET-*, KXIPL-*, KXTENNIS-*, KXATP-*, KXPGA-*, KXUFC-*, KXRUGBY-*, KXF1-*, etc.
+
 Polymarket slugs: moneyline (series winner) and child_moneyline (per-map/game winner)
 
 ### CRYPTO (disabled — see below)
@@ -41,21 +45,34 @@ Disabled by default due to oracle mismatch (see config.CRYPTO_MATCHING_ENABLED).
 
 ## Active Kalshi Sports (as of March 2026)
 
-Kalshi currently only offers **esports** game-winner markets within a 72h window:
-- CS2 (KXCS2MAP, KXCS2GAME), LOL (KXLOLMAP, KXLOLGAME), VALORANT (KXVALORANTMAP, KXVALORANTGAME), DOTA2 (KXDOTA2GAME)
+Both **esports** and **traditional US sports** game-winner markets are active within the 72h window:
 
-Traditional sports NOT currently on Kalshi (within 72h): NBA, NHL, MLB, NFL, soccer, cricket, tennis.
+**Esports (always available):**
+- CS2: KXCS2MAP, KXCS2GAME
+- LOL: KXLOLMAP, KXLOLGAME
+- VALORANT: KXVALORANTMAP, KXVALORANTGAME
+- DOTA2: KXDOTA2GAME
+
+**Traditional US Sports (GAME format — Kalshi's current series):**
+- NBA: KXNBAGAME — "Minnesota at Denver Winner?" format, series_ticker is null (ticker-prefix fallback)
+- NHL: KXNHLGAME
+- MLB: KXMLBGAME
+- NFL: KXNFLGAME
+- NCAAB: KXNCAABGAME
+
+**Important — US Sports title format:**
+Kalshi uses "Away at Home Winner?" (e.g. "Minnesota at Denver Winner?").
+`_extract_both_teams` handles this via `r'^(.+?)\s+at\s+(.+?)\s+(?:Winner|Game|Match)\b'` pattern.
+
+**Note on other sports:**
 - IPL cricket markets exist (KXIPL) but with June 2026 resolution dates — outside 72h window
-- KXBOXING exists but typical fight dates are 4-5 days out (outside 72h)
-- KXNCAAF and KXF1 have championship markets far in the future (months away)
-
-Polymarket HAS NHL/NBA/NCAAB game-winner markets within 72h. No cross-platform match is possible
-until Kalshi lists equivalent near-term markets.
+- KXBOXING typical fight dates are 4-5 days out (outside 72h)
+- KXNCAAF and KXF1 have championship markets far in the future
 
 ## Sports Market Matching — ALL 6 Must Pass
 
-1. **sport**       — same sport code (CS2, LOL, VALORANT, NBA, etc.)
-2. **team**        — same normalized team name (see normalize_team_name below)
+1. **sport**       — same sport code (CS2, LOL, VALORANT, NBA, NHL, MLB, NFL, etc.)
+2. **team**        — same normalized team name (see normalize_team_name + canonicalize_team_name below)
 3. **opponent**    — same normalized opponent — prevents DRX vs TeamA matching DRX vs TeamB
                      when the same team plays multiple games in the 72h window
 4. **date**        — resolution_dt within ±4 hours (RESOLUTION_TIME_TOLERANCE_HOURS_SPORTS)
@@ -68,8 +85,9 @@ until Kalshi lists equivalent near-term markets.
 
 If any criterion fails → pair is rejected. Rejection reasons are logged.
 
-## Team Name Normalization (normalize_team_name)
+## Team Name Normalization
 
+### normalize_team_name (all sports)
 Applied to all team names before matching:
 - Lowercase, remove punctuation
 - Strip common wrapper words: "team", "esports", "gaming", "fc", "sc", "the"
@@ -77,6 +95,18 @@ Applied to all team names before matching:
 - Guard: if stripping all words leaves empty string, keep originals
 - Strip trailing numbers: "Cloud9 2" → "cloud9"
 - Examples: "G2 Esports" → "g2", "Team Vitality" → "vitality", "M80" → "m80"
+
+### canonicalize_team_name (US sports — city → nickname)
+Applied AFTER normalize_team_name for NBA, NHL, MLB, NFL markets.
+Kalshi uses city names ("Minnesota"), Polymarket uses team nicknames ("Timberwolves").
+`canonicalize_team_name(name, sport)` looks up sport-specific alias tables:
+
+    NBA:  "minnesota" → "timberwolves", "golden state" → "warriors", etc. (30 teams)
+    NHL:  "minnesota" → "wild", "vegas" → "golden knights", etc. (32 teams)
+    MLB:  "chicago" is ambiguous → "white sox" or "cubs" resolved by full name
+    NFL:  "new england" → "patriots", "green bay" → "packers", etc. (32 teams)
+
+For sports not in the alias table (esports, tennis, soccer) the function is a no-op.
 
 ## Map Number Extraction (_extract_map_number)
 
@@ -117,6 +147,12 @@ Disabled via `CRYPTO_MATCHING_ENABLED = False` in config.py.
 - Low:        0.8–1.5c
 - Below 0.8c: ignored (MIN_SPREAD_CENTS)
 
+## Trade Sizing Limits
+
+- `EXEC_MAX_UNITS_PER_MAP = 300`    — hard cap per single map/game market
+- `EXEC_MAX_UNITS_PER_MARKET = 300` — hard cap on total units across all trades on one Kalshi ticker
+- Actual units per trade also capped by available Kalshi + Polymarket balance at time of execution
+
 ## Architecture
 
 ### Two-Speed Loop
@@ -127,6 +163,7 @@ Disabled via `CRYPTO_MATCHING_ENABLED = False` in config.py.
 1. Paginate GET /markets?status=open&limit=1000 (all pages, ~250+ pages)
 2. `_normalize_one`: classify as SPORTS (series_ticker lookup) or CRYPTO (keyword parsing)
 3. Sports: extract team, opponent from yes_sub_title + title ("Will X win the X vs. Y match?")
+   - US Sports (GAME format): extract from title "Away at Home Winner?" pattern
 4. Crypto: combine title + subtitle to extract asset, direction, threshold
 5. Filter by 72h window (resolution_dt ≤ now+72h)
 
@@ -153,19 +190,38 @@ Each Kalshi market and each Polymarket market appears in at most one matched pai
 
 | File | Purpose |
 |------|---------|
-| scanner/runner.py | Main loop (two-speed: refresh + poll) |
+| scanner/runner.py | Main loop (two-speed: refresh + poll); archives logs/DB on startup |
 | scanner/kalshi_client.py | Kalshi market fetch + normalization + price polling |
 | scanner/poly_client.py | Polymarket Gamma fetch + CLOB price polling |
 | scanner/market_matcher.py | Cross-platform matching (6-criteria sports, 4-criteria crypto) |
 | scanner/opportunity_finder.py | Arb detection from matched pair prices |
 | scanner/models.py | NormalizedMarket, MatchedPair, Opportunity dataclasses |
 | scanner/config.py | All constants (RESOLUTION_TIME_TOLERANCE_HOURS, CRYPTO_MATCHING_ENABLED, etc.) |
+| scanner/arb_executor.py | Live trade execution (Kalshi + Polymarket orders) |
+| scanner/paper_executor.py | Paper trade execution (virtual wallet, no real orders) |
+| report.py | Generates a full report from scanner_paper.db (paper run analytics) |
 
 ## Entry Point
 
     python -m scanner.runner           # scan-only (no trades)
     python -m scanner.runner --live    # live trading
     python -m scanner.runner --paper   # paper trading (dry-run, logs trades but no real orders)
+
+## Startup Behavior — Log & DB Archive
+
+**Every restart archives all existing files before starting fresh.**
+On startup, `_archive_and_reset()` moves the following files (if they exist) into
+`logs_archive/YYYY-MM-DD_HHMMSS/`:
+
+    scanner.log
+    opportunities.log
+    opportunities.json
+    scanner.db
+    scanner_paper.db
+
+A `manifest.txt` is written into each archive directory recording the timestamp.
+This ensures every run starts with clean logs and a fresh DB, and all historical
+data is preserved in `logs_archive/`.
 
 ## API Endpoints
 
@@ -180,6 +236,10 @@ Each Kalshi market and each Polymarket market appears in at most one matched pai
     scanner.log          — all logs (debug + info)
     opportunities.log    — filtered: only matched pairs and arb opportunities
     opportunities.json   — NDJSON, one object per scan run
+    scanner.db           — SQLite: opportunities + trades (live mode)
+    scanner_paper.db     — SQLite: opportunities + trades (paper mode)
+    logs_archive/        — timestamped archives of all above files, created on each restart
+    report.py            — run `py report.py` to generate analytics from scanner_paper.db
 
 ## Environment Variables (credentials for trading)
 
@@ -204,3 +264,5 @@ Each Kalshi market and each Polymarket market appears in at most one matched pai
 - Polymarket soccer "Will X win?" (YES/NO outcomes) are handled by `_normalize_yes_no_sports_market`:
   extracts team name from question text, skips draw markets.
 - Date tolerance for sports is 4h (RESOLUTION_TIME_TOLERANCE_HOURS_SPORTS), separate from crypto (1h).
+- Kalshi NBA/NHL/MLB/NFL GAME-format markets have `series_ticker: null` in the API response.
+  The `_get_sport()` function falls back to ticker-prefix matching (e.g. "KXNBAGAME" prefix → "NBA").

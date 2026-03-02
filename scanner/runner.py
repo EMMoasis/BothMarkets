@@ -86,22 +86,45 @@ def _load_env() -> None:
                     os.environ.setdefault(k, v)
 
 
-def _rotate_opps_log() -> None:
+def _archive_and_reset() -> None:
     """
-    On startup: if opportunities.log exists, move it to old_logs/ with a
-    timestamped filename, then start a fresh empty file.
+    On every startup: move ALL existing log files and DB files into a
+    timestamped subdirectory under logs_archive/ so each run starts clean.
+
+    Files archived (if they exist):
+      scanner.log, opportunities.log, opportunities.json,
+      scanner.db, scanner_paper.db
     """
-    if not os.path.exists(OPPS_LOG_FILE):
+    files_to_archive = [
+        LOG_FILE,
+        OPPS_LOG_FILE,
+        OPPS_JSON_FILE,
+        DB_FILE,
+        DRY_RUN_DB_FILE,
+    ]
+
+    # Only create archive dir if at least one file exists
+    if not any(os.path.exists(f) for f in files_to_archive):
         return
-    old_logs_dir = os.path.join(os.path.dirname(os.path.abspath(OPPS_LOG_FILE)), "old_logs")
-    os.makedirs(old_logs_dir, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    dest = os.path.join(old_logs_dir, f"opportunities_{ts}.log")
-    shutil.move(OPPS_LOG_FILE, dest)
+
+    root = os.path.dirname(os.path.abspath(LOG_FILE))
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    archive_dir = os.path.join(root, "logs_archive", ts)
+    os.makedirs(archive_dir, exist_ok=True)
+
+    for f in files_to_archive:
+        if os.path.exists(f):
+            shutil.move(f, os.path.join(archive_dir, os.path.basename(f)))
+
+    # Write a small manifest so it's easy to know what run this was
+    manifest_path = os.path.join(archive_dir, "manifest.txt")
+    with open(manifest_path, "w", encoding="utf-8") as mf:
+        mf.write(f"Archived at: {datetime.now().isoformat()}\n")
+        mf.write(f"Source dir:  {root}\n")
 
 
 def _setup_logging() -> None:
-    _rotate_opps_log()
+    _archive_and_reset()
 
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
 
